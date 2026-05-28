@@ -1,0 +1,42 @@
+{
+  "expo": {
+    "name": "Third Space",
+    "slug": "third-space",
+    "scheme": "thirdspace",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "userInterfaceStyle": "light",
+    "splash": {
+      "resizeMode": "contain",
+      "backgroundColor": "#ffffff"
+    },
+    "assetBundlePatterns": [
+      "**/*"
+    ],
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.thirdspace.app",
+      "infoPlist": {
+        "NSLocationWhenInUseUsageDescription": "Third Space uses your location to show nearby spaces and directions."
+      }
+    },
+    "android": {
+      "package": "com.thirdspace.app",
+      "permissions": [
+        "ACCESS_COARSE_LOCATION",
+        "ACCESS_FINE_LOCATION"
+      ]
+    },
+    "web": {
+      "bundler": "metro",
+      "output": "static"
+    },
+    "plugins": [
+      "expo-router",
+      "expo-location"
+    ],
+    "experiments": {
+      "typedRoutes": true
+    }
+  }
+}

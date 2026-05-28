@@ -1,0 +1,46 @@
+{
+  "name": "third-space",
+  "main": "expo-router/entry",
+  "version": "1.0.0",
+  "scripts": {
+    "start": "expo start",
+    "android": "expo start --android",
+    "ios": "expo start --ios",
+    "web": "expo start --web",
+    "build": "eas build",
+    "lint": "expo lint",
+    "type-check": "tsc --noEmit",
+    "test": "npm run type-check"
+  },
+  "dependencies": {
+    "@supabase/supabase-js": "^2.39.3",
+    "expo": "~56.0.4",
+    "expo-constants": "~56.0.15",
+    "expo-linking": "~56.0.11",
+    "expo-location": "~56.0.13",
+    "expo-router": "~56.2.6",
+    "expo-splash-screen": "~56.0.10",
+    "expo-status-bar": "~56.0.4",
+    "expo-system-ui": "~56.0.5",
+    "lucide-react-native": "^0.460.0",
+    "nativewind": "^4.0.0",
+    "react": "19.2.3",
+    "react-native": "0.85.3",
+    "react-native-maps": "1.27.2",
+    "react-native-reanimated": "4.3.1",
+    "react-native-safe-area-context": "~5.7.0",
+    "react-native-screens": "4.25.2",
+    "react-native-svg": "15.15.4",
+    "react-native-worklets": "^0.8.3"
+  },
+  "devDependencies": {
+    "@babel/core": "^7.20.0",
+    "@types/react": "~19.2.14",
+    "babel-preset-expo": "~56.0.0",
+    "eslint": "^8.57.0",
+    "eslint-config-expo": "~56.0.4",
+    "tailwindcss": "3.3.5",
+    "typescript": "~6.0.3"
+  },
+  "private": true
+}
