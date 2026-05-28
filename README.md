@@ -1,4 +1,5 @@
-# Third Space - Mobile App for Ranking Third Spaces
+# thirdSpace
+Find thirdSpaces near you
 
 A React Native app built with Expo for discovering, rating, and ranking third spaces like cafes, parks, libraries, and coworking spaces based on atmosphere and utility.
 
