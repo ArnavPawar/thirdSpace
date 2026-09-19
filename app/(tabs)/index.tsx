@@ -11,6 +11,7 @@ import { CATEGORY_CONFIG, type FeedActivity, type ReviewComment, type UserRating
 export default function FeedScreen() {
   const { userId } = useAuth();
   const [activity, setActivity] = useState<FeedActivity[]>([]);
+  const [feedScope, setFeedScope] = useState<'public' | 'following'>('public');
   const [comments, setComments] = useState<Record<string, ReviewComment[]>>({});
   const [commentDrafts, setCommentDrafts] = useState<Record<string, string>>({});
   const [expandedComments, setExpandedComments] = useState<Record<string, boolean>>({});
@@ -19,7 +20,7 @@ export default function FeedScreen() {
 
   const loadActivity = useCallback(async () => {
     try {
-      const items = await listRecentActivity();
+      const items = await listRecentActivity({ currentUserId: userId, scope: feedScope });
       setActivity(items);
     } catch {
       Alert.alert('Feed Error', 'Could not load recent reviews.');
@@ -27,7 +28,7 @@ export default function FeedScreen() {
       setIsLoading(false);
       setRefreshing(false);
     }
-  }, []);
+  }, [feedScope, userId]);
 
   useEffect(() => {
     loadActivity();
@@ -140,6 +141,22 @@ export default function FeedScreen() {
         <View className="px-4 pt-2">
           <Text className="text-2xl font-bold text-gray-900 mb-2">Recent Reviews</Text>
           <Text className="text-gray-600 mb-6">See what the community is saying about local spaces</Text>
+          <View className="flex-row bg-white rounded-xl border border-gray-200 p-1 mb-4">
+            {(['public', 'following'] as const).map((scope) => (
+              <TouchableOpacity
+                key={scope}
+                onPress={() => setFeedScope(scope)}
+                className={`flex-1 py-3 rounded-lg items-center ${
+                  feedScope === scope ? 'bg-primary' : 'bg-transparent'
+                }`}
+                activeOpacity={0.8}
+              >
+                <Text className={`font-semibold ${feedScope === scope ? 'text-white' : 'text-gray-600'}`}>
+                  {scope === 'public' ? 'Public' : 'Following'}
+                </Text>
+              </TouchableOpacity>
+            ))}
+          </View>
         </View>
 
         {isLoading ? (
@@ -149,7 +166,18 @@ export default function FeedScreen() {
           </View>
         ) : (
           <View className="px-4">
-            {activity.map((item) => (
+            {activity.length === 0 ? (
+              <View className="bg-white rounded-xl border border-gray-200 p-8 items-center">
+                <Text className="text-lg font-semibold text-gray-900 mb-2">
+                  No {feedScope === 'following' ? 'following' : 'public'} reviews yet
+                </Text>
+                <Text className="text-gray-600 text-center">
+                  {feedScope === 'following'
+                    ? 'Follow people from the Public feed to build this view.'
+                    : 'Seed demo reviews or rate a space to start the feed.'}
+                </Text>
+              </View>
+            ) : activity.map((item) => (
               <View key={item.id} className="bg-white rounded-xl border border-gray-200 shadow-sm mb-4 overflow-hidden">
                 <View className="p-4 pb-2 flex-row items-center justify-between">
                   <View className="flex-row items-center flex-1">

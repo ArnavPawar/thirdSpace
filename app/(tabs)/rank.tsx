@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { ActivityIndicator, Alert, ScrollView, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { router } from 'expo-router';
 import MapView, { Marker } from 'react-native-maps';
 import type { LatLng, LongPressEvent, MarkerDragStartEndEvent, Region } from 'react-native-maps';
 import { ChevronDown, LocateFixed, MapPin, Search, Send } from 'lucide-react-native';
@@ -53,7 +54,7 @@ const createInitialRatings = (): RatingFormData => ({
 });
 
 export default function RankScreen() {
-  const { userId } = useAuth();
+  const { userId, isDemoMode } = useAuth();
   const [selectedSpace, setSelectedSpace] = useState<ThirdSpace | null>(null);
   const [ratings, setRatings] = useState<RatingFormData>(createInitialRatings);
   const [searchQuery, setSearchQuery] = useState('');
@@ -183,6 +184,18 @@ export default function RankScreen() {
   };
 
   const handleSubmitRating = async () => {
+    if (isDemoMode) {
+      Alert.alert(
+        'Sign In Required',
+        'Create an account or sign in before rating so your review can be saved to Supabase.',
+        [
+          { text: 'Cancel', style: 'cancel' },
+          { text: 'Sign In', onPress: () => router.push('/auth' as never) },
+        ]
+      );
+      return;
+    }
+
     if (!selectedSpace) {
       Alert.alert('Choose a Space', 'Search for a location or drop a pin before submitting.');
       return;

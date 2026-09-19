@@ -84,7 +84,7 @@ export const demoProfiles: Profile[] = [
 
 export const demoSpaces: SpaceWithAttributes[] = [
   {
-    id: 'space-northside-social',
+    id: '00000000-0000-0000-0000-000000000101',
     name: 'Northside Social',
     category: 'Cafe & Coworking',
     primary_purpose: 'Remote Work',
@@ -101,7 +101,7 @@ export const demoSpaces: SpaceWithAttributes[] = [
     current_user_favorited: true,
     attributes: buildAttributes(
       'attr-northside-social',
-      'space-northside-social',
+      '00000000-0000-0000-0000-000000000101',
       'Cafe & Coworking',
       'Remote Work',
       { wifi_quality: 5, outlet_density: 4, quietness: 4, chair_comfort: 4 },
@@ -109,7 +109,7 @@ export const demoSpaces: SpaceWithAttributes[] = [
     ),
   },
   {
-    id: 'space-crystal-water-park',
+    id: '00000000-0000-0000-0000-000000000102',
     name: 'Crystal City Water Park',
     category: 'Park & Nature',
     primary_purpose: 'Picnic',
@@ -125,7 +125,7 @@ export const demoSpaces: SpaceWithAttributes[] = [
     current_user_favorited: false,
     attributes: buildAttributes(
       'attr-crystal-water-park',
-      'space-crystal-water-park',
+      '00000000-0000-0000-0000-000000000102',
       'Park & Nature',
       'Picnic',
       { scenery_views: 5, seating_benches: 4, shade_cover: 3, cleanliness: 4 },
@@ -133,7 +133,7 @@ export const demoSpaces: SpaceWithAttributes[] = [
     ),
   },
   {
-    id: 'space-central-library-atrium',
+    id: '00000000-0000-0000-0000-000000000103',
     name: 'Arlington Central Library Atrium',
     category: 'Public Architecture (Atriums, Hotel Lobbies)',
     primary_purpose: 'Lobby Work',
@@ -149,7 +149,7 @@ export const demoSpaces: SpaceWithAttributes[] = [
     current_user_favorited: false,
     attributes: buildAttributes(
       'attr-central-library-atrium',
-      'space-central-library-atrium',
+      '00000000-0000-0000-0000-000000000103',
       'Public Architecture (Atriums, Hotel Lobbies)',
       'Lobby Work',
       { people_watching: 4, design_aesthetic: 5, public_restrooms: 3, comfort: 4 },
@@ -157,7 +157,7 @@ export const demoSpaces: SpaceWithAttributes[] = [
     ),
   },
   {
-    id: 'space-board-room',
+    id: '00000000-0000-0000-0000-000000000104',
     name: 'The Board Room',
     category: 'Interactive Fun (Arcades, Board Games)',
     primary_purpose: 'Board Game Night',
@@ -174,7 +174,7 @@ export const demoSpaces: SpaceWithAttributes[] = [
     current_user_favorited: true,
     attributes: buildAttributes(
       'attr-board-room',
-      'space-board-room',
+      '00000000-0000-0000-0000-000000000104',
       'Interactive Fun (Arcades, Board Games)',
       'Board Game Night',
       { gear_game_quality: 5, group_friendliness: 5, cost_value: 4, atmosphere: 4 },
@@ -182,7 +182,7 @@ export const demoSpaces: SpaceWithAttributes[] = [
     ),
   },
   {
-    id: 'space-gravelly-point',
+    id: '00000000-0000-0000-0000-000000000105',
     name: 'Gravelly Point',
     category: 'Smoke & Sunset Spots',
     primary_purpose: 'Sunset Watch',
@@ -196,7 +196,7 @@ export const demoSpaces: SpaceWithAttributes[] = [
     current_user_favorited: false,
     attributes: buildAttributes(
       'attr-gravelly-point',
-      'space-gravelly-point',
+      '00000000-0000-0000-0000-000000000105',
       'Smoke & Sunset Spots',
       'Sunset Watch',
       { privacy_seclusion: 3, view_quality: 5, wind_shelter: 2, chill_factor: 5 },

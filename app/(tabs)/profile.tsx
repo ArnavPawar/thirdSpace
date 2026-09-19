@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { ActivityIndicator, Alert, Modal, ScrollView, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { router } from 'expo-router';
+import { router, useFocusEffect } from 'expo-router';
 import { Award, Heart, LogIn, MapPin, Save, Settings, Star, TrendingUp, UserPlus, X } from 'lucide-react-native';
 import SpaceCard from '@/components/SpaceCard';
 import { demoUserLabel, useAuth } from '@/lib/auth';
@@ -47,6 +47,12 @@ export default function ProfileScreen() {
     loadProfile();
   }, [loadProfile]);
 
+  useFocusEffect(
+    useCallback(() => {
+      loadProfile();
+    }, [loadProfile])
+  );
+
   const purposeOptions = useMemo(() => Array.from(
     new Set(rankings.map((ranking) => ranking.space.primary_purpose).filter(Boolean))
   ) as CategoryPurpose[], [rankings]);
@@ -59,7 +65,7 @@ export default function ProfileScreen() {
   const openSocialModal = async (type: 'followers' | 'following') => {
     setSocialModalType(type);
     try {
-      setSocialProfiles(await listSocialProfiles(type));
+      setSocialProfiles(await listSocialProfiles(type, userId));
     } catch {
       Alert.alert('Social Error', 'Could not load profiles.');
     }
@@ -325,7 +331,18 @@ export default function ProfileScreen() {
             </View>
 
             <View className="p-4">
-              {socialProfiles.map((item) => (
+              {socialProfiles.length === 0 ? (
+                <View className="py-8 items-center">
+                  <Text className="text-gray-900 font-semibold mb-1">
+                    No {socialModalType === 'followers' ? 'followers' : 'following'} yet
+                  </Text>
+                  <Text className="text-gray-500 text-center text-sm">
+                    {socialModalType === 'followers'
+                      ? 'People who follow you will appear here.'
+                      : 'Follow people from the feed to see them here.'}
+                  </Text>
+                </View>
+              ) : socialProfiles.map((item) => (
                 <View key={item.id} className="flex-row items-center mb-4">
                   <View className="w-11 h-11 bg-primary rounded-full items-center justify-center mr-3">
                     <Text className="text-white font-bold">
