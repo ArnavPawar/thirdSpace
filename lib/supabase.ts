@@ -131,7 +131,10 @@ export const isSupabaseConfigured = Boolean(
     !supabaseAnonKey.includes('your_')
 );
 
-export const supabase: any = isSupabaseConfigured
+// Expo's web pre-render runs in Node, which lacks WebSocket before v22 and makes Supabase realtime throw.
+const canCreateClient = isSupabaseConfigured && typeof globalThis.WebSocket !== 'undefined';
+
+export const supabase: any = canCreateClient
   ? createClient<Database>(supabaseUrl!, supabaseAnonKey!, {
       auth: {
         autoRefreshToken: true,

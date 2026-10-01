@@ -36,7 +36,10 @@ npm install
 
 1. Create a new Supabase project at [supabase.com](https://supabase.com)
 2. Run the SQL schema in `supabase/schema.sql` in your Supabase SQL Editor
-3. Update your `.env` file with the project URL and anon key
+3. Run `supabase/secret-spots-and-vibes.sql` to enable secret spots (Gatekeeper mode) and Vibe titles
+4. Run `supabase/social-auth.sql` so Apple/Google/Facebook sign-ups always get a unique profile
+5. In Authentication → URL Configuration, add `thirdspace://**` and `exp://**` to Redirect URLs
+6. Update your `.env` file with the project URL and anon key
 
 ### 4. Run the App
 

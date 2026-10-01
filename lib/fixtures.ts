@@ -5,6 +5,7 @@ import {
   type Profile,
   type ProfileWithStats,
   type ReviewComment,
+  type SecretSpotRequest,
   type SpaceWithAttributes,
   type UserRanking,
 } from '@/types/space';
@@ -37,6 +38,7 @@ export const demoProfiles: Profile[] = [
     id: 'profile-sarah',
     user_id: demoCurrentUserId,
     username: 'sarah_explores',
+    vibe_title: 'Work Junkie',
     full_name: 'Sarah Chen',
     bio: 'Digital nomad, coffee enthusiast, and third-space hunter.',
     location: 'Arlington, VA',
@@ -48,6 +50,7 @@ export const demoProfiles: Profile[] = [
     id: 'profile-mike',
     user_id: 'user-mike',
     username: 'mikeplays',
+    vibe_title: 'Court Rat',
     full_name: 'Mike Rodriguez',
     bio: 'Pickup basketball and late-night food spots.',
     location: 'Arlington, VA',
@@ -60,6 +63,7 @@ export const demoProfiles: Profile[] = [
     id: 'profile-emma',
     user_id: 'user-emma',
     username: 'emma_reads',
+    vibe_title: 'Urban Explorer',
     full_name: 'Emma Thompson',
     bio: 'Quiet corners, libraries, and public spaces.',
     location: 'Washington, DC',
@@ -72,6 +76,7 @@ export const demoProfiles: Profile[] = [
     id: 'profile-nina',
     user_id: 'user-nina',
     username: 'nina_nights',
+    vibe_title: 'Late Night Viber',
     full_name: 'Nina Patel',
     bio: 'Cozy bars and sunset overlooks.',
     location: 'Alexandria, VA',
@@ -205,6 +210,112 @@ export const demoSpaces: SpaceWithAttributes[] = [
   },
 ];
 
+const buildSecretSpace = (
+  space: Omit<SpaceWithAttributes, 'created_at' | 'updated_at' | 'is_secret' | 'attributes'> & {
+    primary_purpose: NonNullable<SpaceWithAttributes['primary_purpose']>;
+  },
+  attributeScores: AttributeScores,
+  totalRatings: number
+): SpaceWithAttributes => ({
+  ...space,
+  is_secret: true,
+  created_at: now,
+  updated_at: now,
+  attributes: buildAttributes(`attr-${space.id}`, space.id, space.category, space.primary_purpose, attributeScores, totalRatings),
+});
+
+export const demoSecretSpaces: SpaceWithAttributes[] = [
+  buildSecretSpace(
+    {
+      id: 'secret-nina-rooftop',
+      name: 'Top Deck at Rosslyn Garage',
+      category: 'Smoke & Sunset Spots',
+      primary_purpose: 'Sunset Watch',
+      address: '1800 N Lynn St, Arlington, VA 22209',
+      latitude: 38.8962,
+      longitude: -77.0712,
+      description: 'Top floor of a quiet garage with a full skyline view. Empty after 7pm.',
+      created_by: 'user-nina',
+      area_hint: 'Rosslyn - skyline views, bring a jacket',
+    },
+    { privacy_seclusion: 5, view_quality: 5, wind_shelter: 2, chill_factor: 5 },
+    3
+  ),
+  buildSecretSpace(
+    {
+      id: 'secret-mike-halfcourt',
+      name: 'Church Lot Half-Court',
+      category: 'Sports Area',
+      primary_purpose: 'Night Session',
+      address: 'N Pershing Dr, Arlington, VA 22201',
+      latitude: 38.8781,
+      longitude: -77.0925,
+      description: 'Solid half-court behind the parish hall. Lights stay on until 11.',
+      created_by: 'user-mike',
+      area_hint: 'Lyon Park - lights stay on late',
+    },
+    { court_field_quality: 4, night_lighting: 5, crowdedness: 5, amenities: 2 },
+    2
+  ),
+  buildSecretSpace(
+    {
+      id: 'secret-emma-mezzanine',
+      name: 'Hotel Mezzanine Reading Nook',
+      category: 'Public Architecture (Atriums, Hotel Lobbies)',
+      primary_purpose: 'Lobby Work',
+      address: '1250 S Hayes St, Arlington, VA 22202',
+      latitude: 38.8627,
+      longitude: -77.0596,
+      description: 'Upstairs mezzanine with armchairs and outlets. Nobody goes up there.',
+      created_by: 'user-emma',
+      area_hint: 'Pentagon City - nobody goes upstairs',
+    },
+    { people_watching: 3, design_aesthetic: 4, public_restrooms: 5, comfort: 5 },
+    2
+  ),
+  buildSecretSpace(
+    {
+      id: 'secret-sarah-bench',
+      name: 'Fort C.F. Smith Hilltop Bench',
+      category: 'Park & Nature',
+      primary_purpose: 'Reading',
+      address: '2411 N 24th St, Arlington, VA 22207',
+      latitude: 38.9016,
+      longitude: -77.1036,
+      description: 'A single bench at the top of the meadow. Quietest spot in the county.',
+      created_by: demoCurrentUserId,
+      area_hint: 'North Arlington - the quietest bench around',
+    },
+    { scenery_views: 5, seating_benches: 3, shade_cover: 4, cleanliness: 5 },
+    1
+  ),
+];
+
+export const demoSecretAccess = [`${demoCurrentUserId}:secret-emma-mezzanine`];
+
+export const demoSecretRequests: SecretSpotRequest[] = [
+  {
+    id: 'secret-request-1',
+    space_id: 'secret-sarah-bench',
+    requester_id: 'user-emma',
+    owner_id: demoCurrentUserId,
+    kind: 'request',
+    message: 'Heard you found the quietest bench in Arlington. I promise to keep it quiet!',
+    status: 'pending',
+    created_at: '2026-05-26T09:00:00Z',
+  },
+  {
+    id: 'secret-request-2',
+    space_id: 'secret-sarah-bench',
+    requester_id: 'user-mike',
+    owner_id: demoCurrentUserId,
+    kind: 'trade',
+    offered_space_id: 'secret-mike-halfcourt',
+    status: 'pending',
+    created_at: '2026-05-26T12:00:00Z',
+  },
+];
+
 export const demoFeed: FeedActivity[] = [
   {
     id: 'rating-1',
@@ -253,6 +364,57 @@ export const demoFeed: FeedActivity[] = [
     current_user_liked: false,
     created_at: '2026-05-23T16:45:00Z',
     space: demoSpaces[2],
+    profile: demoProfiles[2],
+    is_following: false,
+  },
+  {
+    id: 'rating-4',
+    user_id: 'user-nina',
+    space_id: demoSpaces[4].id,
+    category: 'Smoke & Sunset Spots',
+    primary_purpose: 'Late-Night Chill',
+    attribute_scores: demoSpaces[4].attributes!.attribute_scores,
+    overall_score: demoSpaces[4].attributes!.overall_score,
+    review_text: 'Planes overhead, city lights across the river. Windy, but nothing beats it at 10pm.',
+    likes_count: 22,
+    comments_count: 0,
+    current_user_liked: false,
+    created_at: '2026-05-25T02:10:00Z',
+    space: demoSpaces[4],
+    profile: demoProfiles[3],
+    is_following: true,
+  },
+  {
+    id: 'rating-5',
+    user_id: 'user-nina',
+    space_id: demoSecretSpaces[0].id,
+    category: 'Smoke & Sunset Spots',
+    primary_purpose: 'Sunset Watch',
+    attribute_scores: demoSecretSpaces[0].attributes!.attribute_scores,
+    overall_score: demoSecretSpaces[0].attributes!.overall_score,
+    review_text: 'Not telling anyone where this is. Best sunset in Arlington.',
+    likes_count: 9,
+    comments_count: 0,
+    current_user_liked: false,
+    created_at: '2026-05-24T23:40:00Z',
+    space: demoSecretSpaces[0],
+    profile: demoProfiles[3],
+    is_following: true,
+  },
+  {
+    id: 'rating-6',
+    user_id: 'user-emma',
+    space_id: demoSecretSpaces[2].id,
+    category: 'Public Architecture (Atriums, Hotel Lobbies)',
+    primary_purpose: 'Lobby Work',
+    attribute_scores: demoSecretSpaces[2].attributes!.attribute_scores,
+    overall_score: demoSecretSpaces[2].attributes!.overall_score,
+    review_text: 'Armchairs, outlets, and total silence. Thanks for keeping this one between us.',
+    likes_count: 4,
+    comments_count: 0,
+    current_user_liked: false,
+    created_at: '2026-05-22T15:00:00Z',
+    space: demoSecretSpaces[2],
     profile: demoProfiles[2],
     is_following: false,
   },

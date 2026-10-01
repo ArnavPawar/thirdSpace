@@ -1,5 +1,6 @@
 import React from 'react';
-import { View, Text, TouchableOpacity } from 'react-native';
+import { Pressable, Text, View } from 'react-native';
+import { colors } from '@/lib/theme';
 
 interface VibeSliderProps {
   label: string;
@@ -7,58 +8,43 @@ interface VibeSliderProps {
   onValueChange: (value: number) => void;
   description?: string;
   disabled?: boolean;
+  color?: string;
 }
 
-export default function VibeSlider({ 
-  label, 
-  value, 
-  onValueChange, 
-  description, 
-  disabled = false 
-}: VibeSliderProps) {
-  const values = [1, 2, 3, 4, 5];
+const VALUE_LABELS = ['Poor', 'Meh', 'Okay', 'Good', 'Great'];
 
+export default function VibeSlider({
+  label,
+  value,
+  onValueChange,
+  description,
+  disabled = false,
+  color = colors.primary,
+}: VibeSliderProps) {
   return (
-    <View className="mb-6">
-      <View className="flex-row justify-between items-center mb-2">
-        <Text className="text-lg font-semibold text-gray-800">{label}</Text>
-        <Text className="text-sm font-medium text-primary">{value}/5</Text>
+    <View className="mb-5">
+      <View className="flex-row justify-between items-baseline">
+        <Text className="text-[15px] font-bold text-ink">{label}</Text>
+        <Text style={{ color }} className="text-sm font-bold">{VALUE_LABELS[value - 1]}</Text>
       </View>
-      
-      {description && (
-        <Text className="text-sm text-gray-600 mb-3">{description}</Text>
-      )}
-      
-      <View className="flex-row justify-between items-center">
-        {values.map((rating) => (
-          <TouchableOpacity
-            key={rating}
-            onPress={() => !disabled && onValueChange(rating)}
-            disabled={disabled}
-            className={`
-              w-12 h-12 rounded-full border-2 items-center justify-center
-              ${value === rating 
-                ? 'bg-primary border-primary' 
-                : 'bg-white border-gray-300'
-              }
-              ${disabled ? 'opacity-50' : 'active:scale-95'}
-            `}
-          >
-            <Text 
-              className={`
-                font-bold text-base
-                ${value === rating ? 'text-white' : 'text-gray-700'}
-              `}
+      {description && <Text className="text-[13px] text-slate-500 mt-0.5 mb-2.5">{description}</Text>}
+
+      <View className="flex-row gap-1.5">
+        {[1, 2, 3, 4, 5].map((rating) => {
+          const isFilled = rating <= value;
+          return (
+            <Pressable
+              key={rating}
+              onPress={() => !disabled && onValueChange(rating)}
+              disabled={disabled}
+              accessibilityLabel={`${label} ${rating} of 5`}
+              style={{ backgroundColor: isFilled ? color : '#f1f5f9' }}
+              className="flex-1 h-10 rounded-xl items-center justify-center"
             >
-              {rating}
-            </Text>
-          </TouchableOpacity>
-        ))}
-      </View>
-      
-      <View className="flex-row justify-between mt-2 px-1">
-        <Text className="text-xs text-gray-500">Poor</Text>
-        <Text className="text-xs text-gray-500">Excellent</Text>
+              <Text className={`font-bold ${isFilled ? 'text-white' : 'text-slate-400'}`}>{rating}</Text>
+            </Pressable>
+          );
+        })}
       </View>
     </View>
   );

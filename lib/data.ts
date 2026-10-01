@@ -8,8 +8,12 @@ import {
   type FeedActivity,
   type Profile,
   type ProfileWithStats,
-  type RatingFormData,
+  type RatingHistoryEntry,
   type ReviewComment,
+  type SecretAccessStatus,
+  type SecretRequestKind,
+  type SecretSpotPreview,
+  type SecretSpotRequest,
   type SpaceCategory,
   type SpaceDetails,
   type SpaceWithAttributes,
@@ -23,6 +27,9 @@ import {
   demoProfile,
   demoProfiles,
   demoRankings,
+  demoSecretAccess,
+  demoSecretRequests,
+  demoSecretSpaces,
   demoSpaces,
 } from './fixtures';
 import { isSupabaseConfigured, supabase } from './supabase';
@@ -33,6 +40,7 @@ type SpaceFilters = {
   category?: SpaceCategory | 'All Categories';
   purpose?: CategoryPurpose | 'All Purposes';
   userLocation?: { latitude: number; longitude: number };
+  viewerId?: string;
 };
 type FeedScope = 'public' | 'following';
 type FeedOptions = {
@@ -41,12 +49,15 @@ type FeedOptions = {
 };
 
 const localState = {
-  spaces: [...demoSpaces],
+  spaces: [...demoSpaces, ...demoSecretSpaces],
   feed: [...demoFeed],
   comments: [...demoComments],
   rankings: [...demoRankings],
   profiles: [...demoProfiles],
   following: new Set(['user-mike', 'user-nina']),
+  secretAccess: new Set(demoSecretAccess),
+  secretRequests: [...demoSecretRequests],
+  sessionRatings: {} as Record<string, number>,
 };
 
 const toIso = () => new Date().toISOString();
@@ -54,9 +65,19 @@ const createId = (prefix: string) => `${prefix}-${Date.now()}-${Math.random().to
 const isUuid = (value: string) =>
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
 const canUseUserScopedRemote = (userId: string) => Boolean(isSupabaseConfigured && supabase && isUuid(userId));
+const secretAccessKey = (userId: string, spaceId: string) => `${userId}:${spaceId}`;
+const coarsenCoordinate = (value: number) => Math.round(value * 100) / 100;
 
 const byCreatedAtDesc = <T extends { created_at: string }>(items: T[]) =>
   [...items].sort((first, second) => new Date(second.created_at).getTime() - new Date(first.created_at).getTime());
+
+const findLocalProfile = (userId?: string) =>
+  localState.profiles.find((profile) => profile.user_id === userId);
+
+const canViewLocalSpace = (space: SpaceWithAttributes, viewerId: string) =>
+  !space.is_secret ||
+  space.created_by === viewerId ||
+  localState.secretAccess.has(secretAccessKey(viewerId, space.id));
 
 const mapSpaceRow = (row: Record<string, unknown>): SpaceWithAttributes => ({
   id: String(row.id),
@@ -70,6 +91,9 @@ const mapSpaceRow = (row: Record<string, unknown>): SpaceWithAttributes => ({
   website: (row.website as string | null) || undefined,
   phone: (row.phone as string | null) || undefined,
   hours: (row.hours as string | null) || undefined,
+  is_secret: Boolean(row.is_secret),
+  created_by: (row.created_by as string | null) || undefined,
+  area_hint: (row.area_hint as string | null) || undefined,
   created_at: String(row.created_at),
   updated_at: String(row.updated_at),
 });
@@ -106,18 +130,26 @@ const mapProfileRow = (row: Record<string, unknown>): Profile => ({
   avatar_url: (row.avatar_url as string | null) || undefined,
   bio: (row.bio as string | null) || undefined,
   location: (row.location as string | null) || undefined,
+  vibe_title: (row.vibe_title as string | null) || undefined,
   created_at: String(row.created_at),
   updated_at: String(row.updated_at),
 });
 
-const getDemoProfile = (userId: string): ProfileWithStats => ({
-  ...(demoProfile.user_id === userId ? demoProfile : { ...demoProfile, user_id: userId }),
-  stats: {
-    ...demoProfile.stats,
-    followers: localState.profiles.filter((profile) => profile.user_id !== userId).length,
-    following: localState.following.size,
-  },
-});
+const getDemoProfile = (userId: string): ProfileWithStats => {
+  const storedProfile = findLocalProfile(userId);
+  const sessionRatings = localState.sessionRatings[userId] || 0;
+
+  return {
+    ...(storedProfile || { ...demoProfile, user_id: userId }),
+    stats: {
+      ...demoProfile.stats,
+      spaces_rated: demoProfile.stats.spaces_rated + sessionRatings,
+      reviews_written: demoProfile.stats.reviews_written + sessionRatings,
+      followers: localState.profiles.filter((profile) => profile.user_id !== userId).length,
+      following: localState.following.size,
+    },
+  };
+};
 
 const applySpaceFilters = (spaces: SpaceWithAttributes[], filters: SpaceFilters = {}) => {
   const query = filters.query?.trim().toLowerCase();
@@ -182,9 +214,14 @@ const aggregateAttributes = (
   };
 };
 
+const listVisibleLocalSpaces = (viewerId: string) =>
+  localState.spaces.filter((space) => canViewLocalSpace(space, viewerId));
+
 export async function listSpaces(filters: SpaceFilters = {}): Promise<SpaceWithAttributes[]> {
+  const viewerId = filters.viewerId || demoCurrentUserId;
+
   if (!isSupabaseConfigured || !supabase) {
-    return applySpaceFilters(localState.spaces, filters);
+    return applySpaceFilters(listVisibleLocalSpaces(viewerId), filters);
   }
 
   const { data, error } = await supabase
@@ -194,7 +231,7 @@ export async function listSpaces(filters: SpaceFilters = {}): Promise<SpaceWithA
 
   if (error) {
     console.warn('Falling back to demo spaces after Supabase error:', error.message);
-    return applySpaceFilters(localState.spaces, filters);
+    return applySpaceFilters(listVisibleLocalSpaces(viewerId), filters);
   }
 
   const spaces = (data || []).map((row: unknown) => mapSpaceWithAttributesRow(row as Record<string, unknown>));
@@ -202,23 +239,30 @@ export async function listSpaces(filters: SpaceFilters = {}): Promise<SpaceWithA
   return applySpaceFilters(spaces, filters);
 }
 
-export async function getSpaceDetails(spaceId: string): Promise<SpaceDetails | null> {
-  const spaces = await listSpaces();
-  const space = spaces.find((item) => item.id === spaceId);
+export async function getSpaceDetails(spaceId: string, viewerId = demoCurrentUserId): Promise<SpaceDetails | null> {
+  const spaces = await listSpaces({ viewerId });
+  const space = spaces.find((item) => item.id === spaceId)
+    || listVisibleLocalSpaces(viewerId).find((item) => item.id === spaceId);
   if (!space) return null;
 
-  const reviews = (await listRecentActivity()).filter((activity) => activity.space_id === spaceId);
+  const reviews = (await listRecentActivity({ currentUserId: viewerId })).filter((activity) => activity.space_id === spaceId);
   const comments = localState.comments.filter((comment) => reviews.some((review) => review.id === comment.rating_id));
+  const ranking = localState.rankings.find((item) => item.user_id === viewerId && item.space_id === spaceId);
 
-  return { ...space, reviews, comments };
+  return {
+    ...space,
+    current_user_favorited: ranking ? ranking.is_favorite : space.current_user_favorited,
+    reviews,
+    comments,
+  };
 }
 
 export async function listRecentActivity(options: FeedOptions = {}): Promise<FeedActivity[]> {
   const scope = options.scope || 'public';
-  const currentUserId = options.currentUserId;
+  const currentUserId = options.currentUserId || demoCurrentUserId;
 
   if (!isSupabaseConfigured || !supabase) {
-    return filterFeedByScope(listRecentActivityFromDemo(), scope);
+    return filterFeedByScope(listRecentActivityFromDemo(currentUserId), scope);
   }
 
   const { data, error } = await supabase
@@ -229,17 +273,15 @@ export async function listRecentActivity(options: FeedOptions = {}): Promise<Fee
 
   if (error) {
     console.warn('Falling back to demo feed after Supabase error:', error.message);
-    return filterFeedByScope(listRecentActivityFromDemo(), scope);
+    return filterFeedByScope(listRecentActivityFromDemo(currentUserId), scope);
   }
 
-  const profileIds = Array.from(
-    new Set((data || []).map((row: unknown) => String((row as Record<string, unknown>).user_id)))
-  ) as string[];
+  const visibleRows = ((data || []) as Record<string, unknown>[]).filter((row) => Boolean(row.spaces));
+  const profileIds = Array.from(new Set(visibleRows.map((row) => String(row.user_id))));
   const profilesByUserId = await fetchProfilesByUserId(profileIds);
-  const followingIds = currentUserId ? await fetchFollowingIds(currentUserId) : new Set<string>();
+  const followingIds = await fetchFollowingIds(currentUserId);
 
-  const remoteFeed = (data || []).map((row: unknown) => {
-    const rawRow = row as unknown as Record<string, unknown>;
+  const remoteFeed = visibleRows.map((rawRow) => {
     const spaceRow = rawRow.spaces as Record<string, unknown>;
     const profile = profilesByUserId[String(rawRow.user_id)] || demoProfiles[0];
 
@@ -261,18 +303,20 @@ export async function listRecentActivity(options: FeedOptions = {}): Promise<Fee
     };
   });
 
-  const demoFeed = listRecentActivityFromDemo();
-  const mergedFeed = mergeFeedActivity(remoteFeed, demoFeed);
+  const mergedFeed = mergeFeedActivity(remoteFeed, listRecentActivityFromDemo(currentUserId));
 
   return filterFeedByScope(mergedFeed, scope);
 }
 
-function listRecentActivityFromDemo(): FeedActivity[] {
-  return byCreatedAtDesc(localState.feed).map((activity) => ({
-    ...activity,
-    is_following: localState.following.has(activity.user_id),
-    comments_count: localState.comments.filter((comment) => comment.rating_id === activity.id).length,
-  }));
+function listRecentActivityFromDemo(viewerId: string): FeedActivity[] {
+  return byCreatedAtDesc(localState.feed)
+    .filter((activity) => canViewLocalSpace(activity.space, viewerId))
+    .map((activity) => ({
+      ...activity,
+      profile: findLocalProfile(activity.user_id) || activity.profile,
+      is_following: localState.following.has(activity.user_id),
+      comments_count: localState.comments.filter((comment) => comment.rating_id === activity.id).length,
+    }));
 }
 
 function mergeFeedActivity(primary: FeedActivity[], fallback: FeedActivity[]): FeedActivity[] {
@@ -311,6 +355,9 @@ export async function submitRating(userId: string, input: SubmitRatingInput): Pr
   const attributeScores = sanitizeAttributeScores(input.rating.attribute_scores);
   const overallScore = calculateOverallScore(attributeScores);
   const timestamp = toIso();
+  const secretFields = input.secret
+    ? { is_secret: true, created_by: userId, area_hint: input.secret.area_hint?.trim() || undefined }
+    : {};
 
   if (!canUseUserScopedRemote(userId)) {
     const existingSpace = localState.spaces.find((space) =>
@@ -319,8 +366,8 @@ export async function submitRating(userId: string, input: SubmitRatingInput): Pr
         Math.abs(space.latitude - input.space.latitude) < 0.0005 &&
         Math.abs(space.longitude - input.space.longitude) < 0.0005)
     );
-    const space = existingSpace || {
-      id: input.space.id || createId('space'),
+    const space: SpaceWithAttributes = existingSpace || {
+      id: input.space.id && !input.space.id.startsWith('draft-') ? input.space.id : createId('space'),
       name: input.space.name,
       category,
       primary_purpose: primaryPurpose,
@@ -331,6 +378,7 @@ export async function submitRating(userId: string, input: SubmitRatingInput): Pr
       website: input.space.website,
       phone: input.space.phone,
       hours: input.space.hours,
+      ...secretFields,
       created_at: timestamp,
       updated_at: timestamp,
       favorites_count: 0,
@@ -340,7 +388,7 @@ export async function submitRating(userId: string, input: SubmitRatingInput): Pr
       localState.spaces.unshift(space);
     }
 
-    const rating = {
+    localState.feed.unshift({
       id: createId('rating'),
       user_id: userId,
       space_id: space.id,
@@ -354,10 +402,10 @@ export async function submitRating(userId: string, input: SubmitRatingInput): Pr
       current_user_liked: false,
       created_at: timestamp,
       space,
-      profile: localState.profiles.find((profile) => profile.user_id === userId) || demoProfiles[0],
-    };
+      profile: findLocalProfile(userId) || demoProfiles[0],
+    });
+    localState.sessionRatings[userId] = (localState.sessionRatings[userId] || 0) + 1;
 
-    localState.feed.unshift(rating);
     const spaceRatings = localState.feed.filter((activity) => activity.space_id === space.id);
     space.attributes = aggregateAttributes(space.id, category, primaryPurpose, spaceRatings);
 
@@ -391,6 +439,7 @@ export async function submitRating(userId: string, input: SubmitRatingInput): Pr
     website: input.space.website,
     phone: input.space.phone,
     hours: input.space.hours,
+    ...secretFields,
     updated_at: timestamp,
   };
 
@@ -414,6 +463,20 @@ export async function submitRating(userId: string, input: SubmitRatingInput): Pr
 
   if (ratingError) throw ratingError;
 
+  const { data: spaceRatings, error: spaceRatingsError } = await supabase
+    .from('ratings')
+    .select('attribute_scores')
+    .eq('space_id', spaceRow.id);
+
+  if (spaceRatingsError) throw spaceRatingsError;
+
+  const aggregate = aggregateAttributes(
+    spaceRow.id,
+    category,
+    primaryPurpose,
+    (spaceRatings || []) as { attribute_scores: AttributeScores }[]
+  );
+
   const { error: attributeError } = await supabase
     .from('space_attributes')
     .upsert(
@@ -421,9 +484,9 @@ export async function submitRating(userId: string, input: SubmitRatingInput): Pr
         space_id: spaceRow.id,
         category,
         primary_purpose: primaryPurpose,
-        attribute_scores: attributeScores,
-        overall_score: overallScore,
-        total_ratings: 1,
+        attribute_scores: aggregate.attribute_scores,
+        overall_score: aggregate.overall_score,
+        total_ratings: aggregate.total_ratings,
         updated_at: timestamp,
       },
       { onConflict: 'space_id' }
@@ -468,7 +531,7 @@ export async function getProfile(userId: string): Promise<ProfileWithStats> {
     { count: following },
   ] = await Promise.all([
     supabase.from('ratings').select('space_id', { count: 'exact', head: true }).eq('user_id', userId),
-    supabase.from('ratings').select('id', { count: 'exact', head: true }).eq('user_id', userId),
+    supabase.from('ratings').select('id', { count: 'exact', head: true }).eq('user_id', userId).not('review_text', 'is', null),
     supabase.from('follows').select('follower_id', { count: 'exact', head: true }).eq('following_id', userId),
     supabase.from('follows').select('following_id', { count: 'exact', head: true }).eq('follower_id', userId),
   ]);
@@ -493,13 +556,10 @@ export async function updateProfile(userId: string, update: Partial<Profile>): P
       localState.profiles[index] = { ...localState.profiles[index], ...update, updated_at: toIso() };
     } else {
       localState.profiles.push({
+        ...demoProfile,
         id: createId('profile'),
         user_id: userId,
-        username: update.username,
-        full_name: update.full_name,
-        avatar_url: update.avatar_url,
-        bio: update.bio,
-        location: update.location,
+        ...update,
         created_at: toIso(),
         updated_at: toIso(),
       });
@@ -517,12 +577,53 @@ export async function updateProfile(userId: string, update: Partial<Profile>): P
         avatar_url: update.avatar_url,
         bio: update.bio,
         location: update.location,
+        vibe_title: update.vibe_title,
         updated_at: toIso(),
       },
       { onConflict: 'user_id' }
     );
   if (error) throw error;
   return getProfile(userId);
+}
+
+export async function setVibeTitle(userId: string, vibeTitle: string): Promise<ProfileWithStats> {
+  return updateProfile(userId, { vibe_title: vibeTitle });
+}
+
+export async function listUserRatingHistory(userId: string): Promise<RatingHistoryEntry[]> {
+  const localHistory: RatingHistoryEntry[] = [
+    ...localState.feed
+      .filter((activity) => activity.user_id === userId)
+      .map((activity) => ({
+        category: activity.category,
+        primary_purpose: activity.primary_purpose,
+        created_at: activity.created_at,
+      })),
+    ...localState.rankings
+      .filter((ranking) => ranking.user_id === userId)
+      .map((ranking) => ({
+        category: ranking.space.category,
+        primary_purpose: ranking.space.primary_purpose,
+        created_at: ranking.last_visited || ranking.created_at,
+      })),
+  ];
+
+  if (!canUseUserScopedRemote(userId)) {
+    return localHistory;
+  }
+
+  const { data, error } = await supabase
+    .from('ratings')
+    .select('category, primary_purpose, created_at')
+    .eq('user_id', userId);
+
+  if (error) return localHistory;
+
+  return ((data || []) as Record<string, unknown>[]).map((row) => ({
+    category: row.category as SpaceCategory,
+    primary_purpose: (row.primary_purpose as CategoryPurpose | null) || undefined,
+    created_at: String(row.created_at),
+  }));
 }
 
 export async function listUserRankings(userId: string): Promise<RankingWithSpace[]> {
@@ -532,15 +633,15 @@ export async function listUserRankings(userId: string): Promise<RankingWithSpace
 
   const { data, error } = await supabase
     .from('user_rankings')
-    .select('*, spaces(*)')
+    .select('*, spaces(*, space_attributes(*))')
     .eq('user_id', userId)
     .order('personal_rank', { ascending: true });
 
   if (error) return localState.rankings.filter((ranking) => ranking.user_id === demoCurrentUserId);
 
-  return (data || []).map((row: unknown) => {
-    const rawRow = row as unknown as Record<string, unknown>;
-    return {
+  return ((data || []) as Record<string, unknown>[])
+    .filter((rawRow) => Boolean(rawRow.spaces))
+    .map((rawRow) => ({
       id: String(rawRow.id),
       user_id: String(rawRow.user_id),
       space_id: String(rawRow.space_id),
@@ -551,8 +652,7 @@ export async function listUserRankings(userId: string): Promise<RankingWithSpace
       created_at: String(rawRow.created_at),
       updated_at: String(rawRow.updated_at),
       space: mapSpaceWithAttributesRow(rawRow.spaces as Record<string, unknown>),
-    };
-  });
+    }));
 }
 
 export async function toggleFavorite(userId: string, space: SpaceWithAttributes): Promise<void> {
@@ -634,7 +734,7 @@ export async function addComment(userId: string, ratingId: string, body: string)
       user_id: userId,
       body: trimmedBody,
       created_at: toIso(),
-      profile: localState.profiles.find((profile) => profile.user_id === userId) || demoProfiles[0],
+      profile: findLocalProfile(userId) || demoProfiles[0],
     });
     return;
   }
@@ -776,4 +876,218 @@ async function fetchFollowingIds(currentUserId: string): Promise<Set<string>> {
   }
 
   return new Set((data || []).map((row: Record<string, unknown>) => String(row.following_id)));
+}
+
+const unknownOwner = (userId: string): Profile => ({
+  id: `profile-${userId}`,
+  user_id: userId,
+  username: 'gatekeeper',
+  full_name: 'A local',
+  created_at: toIso(),
+  updated_at: toIso(),
+});
+
+function getLocalSecretAccess(space: SpaceWithAttributes, viewerId: string): SecretAccessStatus {
+  if (space.created_by === viewerId) return 'owner';
+  if (localState.secretAccess.has(secretAccessKey(viewerId, space.id))) return 'unlocked';
+  const hasPendingRequest = localState.secretRequests.some((request) =>
+    request.space_id === space.id && request.requester_id === viewerId && request.status === 'pending'
+  );
+  return hasPendingRequest ? 'pending' : 'locked';
+}
+
+function toSecretPreview(space: SpaceWithAttributes, access: SecretAccessStatus, owner: Profile): SecretSpotPreview {
+  const isVisible = access === 'owner' || access === 'unlocked';
+
+  return {
+    id: space.id,
+    category: space.category,
+    primary_purpose: space.primary_purpose,
+    area_hint: space.area_hint,
+    approx_latitude: isVisible ? space.latitude : coarsenCoordinate(space.latitude),
+    approx_longitude: isVisible ? space.longitude : coarsenCoordinate(space.longitude),
+    owner,
+    overall_score: space.attributes?.overall_score,
+    access,
+    space: isVisible ? space : undefined,
+    created_at: space.created_at,
+  };
+}
+
+function listLocalSecretSpots(viewerId: string): SecretSpotPreview[] {
+  return localState.spaces
+    .filter((space) => space.is_secret)
+    .map((space) => toSecretPreview(
+      space,
+      getLocalSecretAccess(space, viewerId),
+      findLocalProfile(space.created_by) || unknownOwner(space.created_by || 'unknown')
+    ));
+}
+
+export async function listSecretSpots(viewerId: string): Promise<SecretSpotPreview[]> {
+  const localSpots = listLocalSecretSpots(viewerId);
+  if (!canUseUserScopedRemote(viewerId)) return localSpots;
+
+  const { data, error } = await supabase.rpc('list_secret_spots');
+  if (error) return localSpots;
+
+  const rows = (data || []) as Record<string, unknown>[];
+  const ownersById = await fetchProfilesByUserId(rows.map((row) => String(row.owner_id)));
+  const visibleIds = rows
+    .filter((row) => row.access === 'owner' || row.access === 'unlocked')
+    .map((row) => String(row.id));
+
+  const visibleSpaces: Record<string, SpaceWithAttributes> = {};
+  if (visibleIds.length > 0) {
+    const { data: spaceRows } = await supabase.from('spaces').select('*, space_attributes(*)').in('id', visibleIds);
+    ((spaceRows || []) as Record<string, unknown>[]).forEach((row) => {
+      const space = mapSpaceWithAttributesRow(row);
+      visibleSpaces[space.id] = space;
+    });
+  }
+
+  const remoteSpots = rows.map((row): SecretSpotPreview => {
+    const id = String(row.id);
+    const ownerId = String(row.owner_id);
+    return {
+      id,
+      category: row.category as SpaceCategory,
+      primary_purpose: (row.primary_purpose as CategoryPurpose | null) || undefined,
+      area_hint: (row.area_hint as string | null) || undefined,
+      approx_latitude: Number(row.approx_latitude),
+      approx_longitude: Number(row.approx_longitude),
+      owner: ownersById[ownerId] || unknownOwner(ownerId),
+      overall_score: row.overall_score === null || row.overall_score === undefined ? undefined : Number(row.overall_score),
+      access: row.access as SecretAccessStatus,
+      space: visibleSpaces[id],
+      created_at: String(row.created_at),
+    };
+  });
+
+  return [...remoteSpots, ...localSpots];
+}
+
+export async function requestSecretSpot(
+  viewerId: string,
+  spot: SecretSpotPreview,
+  options: { kind: SecretRequestKind; offeredSpaceId?: string; message?: string }
+): Promise<SecretAccessStatus> {
+  if (options.kind === 'trade' && !options.offeredSpaceId) {
+    throw new Error('Pick one of your secret spots to trade.');
+  }
+
+  if (!canUseUserScopedRemote(viewerId) || !isUuid(spot.id)) {
+    const existing = localState.secretRequests.find((request) =>
+      request.space_id === spot.id && request.requester_id === viewerId && request.status === 'pending'
+    );
+    if (existing && options.kind === 'request') return 'pending';
+
+    const request: SecretSpotRequest = {
+      id: createId('secret-request'),
+      space_id: spot.id,
+      requester_id: viewerId,
+      owner_id: spot.owner.user_id,
+      kind: options.kind,
+      offered_space_id: options.offeredSpaceId,
+      message: options.message?.trim() || undefined,
+      status: 'pending',
+      created_at: toIso(),
+    };
+
+    // Demo owners can't respond, so trades settle immediately to keep the flow explorable.
+    if (options.kind === 'trade') {
+      request.status = 'accepted';
+      localState.secretAccess.add(secretAccessKey(viewerId, spot.id));
+      localState.secretAccess.add(secretAccessKey(spot.owner.user_id, options.offeredSpaceId!));
+      localState.secretRequests.push(request);
+      return 'unlocked';
+    }
+
+    localState.secretRequests.push(request);
+    return 'pending';
+  }
+
+  const { data, error } = await supabase.rpc('request_secret_spot', {
+    target_space: spot.id,
+    offered_space: options.offeredSpaceId ?? null,
+    note: options.message?.trim() || null,
+  });
+
+  if (error) throw error;
+  return (data as SecretAccessStatus | null) || 'pending';
+}
+
+export async function listIncomingSecretRequests(ownerId: string): Promise<SecretSpotRequest[]> {
+  const enrichLocal = (request: SecretSpotRequest): SecretSpotRequest => ({
+    ...request,
+    requester: request.requester || findLocalProfile(request.requester_id),
+    space_name: request.space_name || localState.spaces.find((space) => space.id === request.space_id)?.name,
+    offered_space_category: request.offered_space_category ||
+      localState.spaces.find((space) => space.id === request.offered_space_id)?.category,
+  });
+
+  const localRequests = byCreatedAtDesc(
+    localState.secretRequests.filter((request) => request.owner_id === ownerId && request.status === 'pending')
+  ).map(enrichLocal);
+
+  if (!canUseUserScopedRemote(ownerId)) return localRequests;
+
+  const { data, error } = await supabase
+    .from('secret_spot_requests')
+    .select('*')
+    .eq('owner_id', ownerId)
+    .eq('status', 'pending')
+    .order('created_at', { ascending: false });
+
+  if (error) return localRequests;
+
+  const rows = (data || []) as Record<string, unknown>[];
+  const requesters = await fetchProfilesByUserId(rows.map((row) => String(row.requester_id)));
+  const spaceIds = rows.map((row) => String(row.space_id));
+  const spaceNames: Record<string, string> = {};
+  if (spaceIds.length > 0) {
+    const { data: spaceRows } = await supabase.from('spaces').select('id, name').in('id', spaceIds);
+    ((spaceRows || []) as Record<string, unknown>[]).forEach((row) => {
+      spaceNames[String(row.id)] = String(row.name);
+    });
+  }
+
+  const remoteRequests = rows.map((row): SecretSpotRequest => ({
+    id: String(row.id),
+    space_id: String(row.space_id),
+    requester_id: String(row.requester_id),
+    owner_id: String(row.owner_id),
+    kind: row.kind as SecretRequestKind,
+    offered_space_id: (row.offered_space_id as string | null) || undefined,
+    message: (row.message as string | null) || undefined,
+    status: row.status as SecretSpotRequest['status'],
+    created_at: String(row.created_at),
+    requester: requesters[String(row.requester_id)],
+    space_name: spaceNames[String(row.space_id)],
+  }));
+
+  return [...remoteRequests, ...localRequests];
+}
+
+export async function respondToSecretRequest(
+  ownerId: string,
+  request: SecretSpotRequest,
+  accept: boolean
+): Promise<void> {
+  if (!canUseUserScopedRemote(ownerId) || !isUuid(request.id)) {
+    const stored = localState.secretRequests.find((item) => item.id === request.id);
+    if (!stored || stored.owner_id !== ownerId || stored.status !== 'pending') return;
+
+    stored.status = accept ? 'accepted' : 'declined';
+    if (accept) {
+      localState.secretAccess.add(secretAccessKey(stored.requester_id, stored.space_id));
+      if (stored.kind === 'trade' && stored.offered_space_id) {
+        localState.secretAccess.add(secretAccessKey(ownerId, stored.offered_space_id));
+      }
+    }
+    return;
+  }
+
+  const { error } = await supabase.rpc('respond_secret_request', { request_id: request.id, accept });
+  if (error) throw error;
 }

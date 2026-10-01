@@ -350,6 +350,9 @@ export interface ThirdSpace {
   website?: string;
   phone?: string;
   hours?: string;
+  is_secret?: boolean;
+  created_by?: string;
+  area_hint?: string;
   created_at: string;
   updated_at: string;
 }
@@ -401,6 +404,7 @@ export interface Profile {
   avatar_url?: string;
   bio?: string;
   location?: string;
+  vibe_title?: string;
   is_following?: boolean;
   created_at: string;
   updated_at: string;
@@ -459,4 +463,44 @@ export interface SubmitRatingInput {
   space: Pick<ThirdSpace, 'name' | 'address' | 'latitude' | 'longitude'> &
     Partial<Pick<ThirdSpace, 'id' | 'description' | 'website' | 'phone' | 'hours'>>;
   rating: RatingFormData;
+  secret?: { area_hint?: string };
+}
+
+export interface RatingHistoryEntry {
+  category: SpaceCategory;
+  primary_purpose?: CategoryPurpose;
+  created_at: string;
+}
+
+export type SecretAccessStatus = 'owner' | 'unlocked' | 'pending' | 'locked';
+
+export interface SecretSpotPreview {
+  id: string;
+  category: SpaceCategory;
+  primary_purpose?: CategoryPurpose;
+  area_hint?: string;
+  approx_latitude: number;
+  approx_longitude: number;
+  owner: Profile;
+  overall_score?: number;
+  access: SecretAccessStatus;
+  space?: SpaceWithAttributes;
+  created_at: string;
+}
+
+export type SecretRequestKind = 'request' | 'trade';
+
+export interface SecretSpotRequest {
+  id: string;
+  space_id: string;
+  requester_id: string;
+  owner_id: string;
+  kind: SecretRequestKind;
+  offered_space_id?: string;
+  message?: string;
+  status: 'pending' | 'accepted' | 'declined';
+  created_at: string;
+  requester?: Profile;
+  space_name?: string;
+  offered_space_category?: SpaceCategory;
 }
