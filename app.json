@@ -16,6 +16,7 @@
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "com.thirdspace.app",
+      "usesAppleSignIn": true,
       "infoPlist": {
         "NSLocationWhenInUseUsageDescription": "Third Space uses your location to show nearby spaces and directions."
       }
@@ -33,7 +34,9 @@
     },
     "plugins": [
       "expo-router",
-      "expo-location"
+      "expo-location",
+      "expo-web-browser",
+      "expo-apple-authentication"
     ],
     "experiments": {
       "typedRoutes": true

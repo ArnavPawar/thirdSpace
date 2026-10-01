@@ -1,149 +1,75 @@
 import React from 'react';
-import { View, Text, TouchableOpacity } from 'react-native';
-import { MapPin, Sparkles, Star } from 'lucide-react-native';
-import { CATEGORY_CONFIG } from '@/types/space';
-import type { SpaceWithAttributes, VibeAttributeDefinition } from '@/types/space';
+import { Text, TouchableOpacity, View } from 'react-native';
+import { KeyRound, MapPin } from 'lucide-react-native';
+import AttributeBars from '@/components/AttributeBars';
+import { CategoryIcon, ScorePill } from '@/components/ui';
+import { formatDistance } from '@/lib/format';
+import { CATEGORY_META, colors } from '@/lib/theme';
+import type { SpaceWithAttributes } from '@/types/space';
 
 interface SpaceCardProps {
   space: SpaceWithAttributes;
   onPress?: () => void;
   showDistance?: boolean;
   compact?: boolean;
+  bordered?: boolean;
+  accessory?: React.ReactNode;
 }
 
-export default function SpaceCard({ 
-  space, 
-  onPress, 
-  showDistance = false, 
-  compact = false 
+export default function SpaceCard({
+  space,
+  onPress,
+  showDistance = false,
+  compact = false,
+  bordered = true,
+  accessory,
 }: SpaceCardProps) {
   const { attributes } = space;
-
-  const formatDistance = (distance?: number) => {
-    if (!distance) return null;
-    return distance < 1 
-      ? `${Math.round(distance * 1000)}m` 
-      : `${distance.toFixed(1)}mi`;
-  };
-
-  const getRatingColor = (rating: number) => {
-    if (rating >= 4) return 'text-green-600';
-    if (rating >= 3) return 'text-yellow-600';
-    return 'text-red-600';
-  };
-
-  const getScoreColor = (score: number) => {
-    if (score >= 80) return 'text-green-600';
-    if (score >= 60) return 'text-yellow-600';
-    return 'text-red-600';
-  };
-
-  const getAttributeValue = (attribute: VibeAttributeDefinition) => {
-    return attributes?.attribute_scores[attribute.key];
-  };
-
-  const visibleAttributes = attributes
-    ? CATEGORY_CONFIG[attributes.category].attributes.filter((attribute) => getAttributeValue(attribute) !== undefined)
-    : [];
+  const purpose = space.primary_purpose || attributes?.primary_purpose;
+  const distance = showDistance ? formatDistance(space.distance) : null;
+  const meta = [CATEGORY_META[space.category].short, purpose, distance].filter(Boolean).join(' · ');
 
   return (
     <TouchableOpacity
       onPress={onPress}
-      activeOpacity={0.7}
-      className={`
-        bg-white rounded-xl border border-gray-200 shadow-sm
-        ${compact ? 'p-3 mb-2' : 'p-4 mb-3'}
-      `}
+      disabled={!onPress}
+      activeOpacity={0.75}
+      className={`bg-white rounded-2xl ${bordered ? 'border border-slate-200' : ''} ${compact ? 'p-3' : 'p-4'}`}
     >
-      {/* Header */}
-      <View className="flex-row justify-between items-start mb-2">
-        <View className="flex-1 mr-3">
-          <Text className={`font-bold text-gray-900 ${compact ? 'text-base' : 'text-lg'}`}>
-            {space.name}
-          </Text>
-          <View className="flex-row items-center mt-1">
-            <Text className={`text-gray-600 ${compact ? 'text-xs' : 'text-sm'}`}>
-              {space.category}
+      <View className="flex-row items-center">
+        <CategoryIcon category={space.category} size={compact ? 40 : 48} />
+        <View className="flex-1 mx-3">
+          <View className="flex-row items-center">
+            <Text className={`font-bold text-ink flex-shrink ${compact ? 'text-[15px]' : 'text-[17px]'}`} numberOfLines={1}>
+              {space.name}
             </Text>
-            {(space.primary_purpose || attributes?.primary_purpose) && (
-              <>
-                <Text className={`text-gray-400 ${compact ? 'text-xs mx-2' : 'text-sm mx-2'}`}>•</Text>
-                <Text className={`text-gray-600 flex-1 ${compact ? 'text-xs' : 'text-sm'}`} numberOfLines={1}>
-                  {space.primary_purpose || attributes?.primary_purpose}
-                </Text>
-              </>
-            )}
-            {showDistance && space.distance !== undefined && (
-              <>
-                <Text className={`text-gray-400 ${compact ? 'text-xs mx-2' : 'text-sm mx-2'}`}>•</Text>
-                <Text className={`text-gray-600 ${compact ? 'text-xs' : 'text-sm'}`}>
-                  {formatDistance(space.distance)}
-                </Text>
-              </>
+            {space.is_secret && (
+              <View className="ml-1.5">
+                <KeyRound size={13} color={colors.secret} />
+              </View>
             )}
           </View>
-        </View>
-
-        {/* Overall atmosphere score */}
-        {attributes && (
-          <View className="items-center">
-            <View className="flex-row items-center mb-1">
-              <Star size={compact ? 14 : 16} color="#eab308" />
-              <Text className={`font-bold ml-1 ${getScoreColor(attributes.overall_score)} ${compact ? 'text-sm' : 'text-base'}`}>
-                {attributes.overall_score}
-              </Text>
+          <Text className="text-[13px] text-slate-500 mt-0.5" numberOfLines={1}>{meta}</Text>
+          {!compact && (
+            <View className="flex-row items-center mt-1">
+              <MapPin size={12} color={colors.subtle} />
+              <Text className="text-xs text-slate-400 flex-1 ml-1" numberOfLines={1}>{space.address}</Text>
             </View>
-            <Text className={`text-gray-500 ${compact ? 'text-xs' : 'text-xs'}`}>
-              /100 ({attributes.total_ratings})
+          )}
+        </View>
+        {accessory ?? (attributes ? (
+          <View className="items-center">
+            <ScorePill score={attributes.overall_score} size={compact ? 'sm' : 'md'} />
+            <Text className="text-[10px] text-slate-400 mt-1">
+              {attributes.total_ratings} {attributes.total_ratings === 1 ? 'rating' : 'ratings'}
             </Text>
           </View>
-        )}
+        ) : null)}
       </View>
 
-      {/* Address */}
-      <View className="flex-row items-center mb-3">
-        <MapPin size={compact ? 12 : 14} color="#9ca3af" />
-        <Text className={`text-gray-600 flex-1 ml-2 ${compact ? 'text-xs' : 'text-sm'}`} numberOfLines={1}>
-          {space.address}
-        </Text>
-      </View>
-
-      {/* Vibe ratings */}
       {attributes && !compact && (
-        <View className="flex-row flex-wrap gap-2 pt-2 border-t border-gray-100">
-          {visibleAttributes.map((attribute) => {
-            const value = getAttributeValue(attribute) || 0;
-
-            return (
-              <View key={attribute.key} className="flex-row items-center bg-gray-50 px-2 py-1 rounded-full">
-                <Sparkles size={12} color="#6b7280" />
-                <Text className="ml-1 text-xs text-gray-600" numberOfLines={1}>
-                  {attribute.label}
-                </Text>
-                <Text className={`ml-1 text-xs font-semibold ${getRatingColor(value)}`}>
-                  {value.toFixed(1)}
-                </Text>
-              </View>
-            );
-          })}
-        </View>
-      )}
-
-      {/* Compact vibe ratings */}
-      {attributes && compact && (
-        <View className="flex-row flex-wrap gap-2">
-          {visibleAttributes.slice(0, 3).map((attribute) => {
-            const value = getAttributeValue(attribute) || 0;
-
-            return (
-              <View key={attribute.key} className="flex-row items-center mr-2">
-                <Sparkles size={12} color="#6b7280" />
-                <Text className={`ml-1 text-xs ${getRatingColor(value)}`}>
-                  {attribute.label} {value.toFixed(1)}
-                </Text>
-              </View>
-            );
-          })}
+        <View className="mt-4 pt-3 border-t border-slate-100">
+          <AttributeBars category={attributes.category} scores={attributes.attribute_scores} />
         </View>
       )}
     </TouchableOpacity>
