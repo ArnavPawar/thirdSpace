@@ -1,27 +1,41 @@
-import React, { useCallback, useState } from 'react';
-import { ActivityIndicator, Alert, ScrollView, Text, TouchableOpacity, View } from 'react-native';
+import React, { useCallback, useRef, useState } from 'react';
+import { ActivityIndicator, Alert, ScrollView, Text, TouchableOpacity, useWindowDimensions, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router, useFocusEffect, useLocalSearchParams } from 'expo-router';
 import { Clock, ExternalLink, Heart, KeyRound, Lock, MapPin, MessageCircle, Navigation, Phone, Plus, Share2 } from 'lucide-react-native';
 import AttributeBars from '@/components/AttributeBars';
 import FeedCard from '@/components/FeedCard';
+import PhotoGrid from '@/components/PhotoGrid';
+import PhotoViewer from '@/components/PhotoViewer';
 import { CategoryIcon, EmptyState, ScorePill } from '@/components/ui';
 import { useAuth } from '@/lib/auth';
-import { getSpaceDetails, toggleFavorite } from '@/lib/data';
+import { getSpaceDetails, listSpacePhotos, toggleFavorite } from '@/lib/data';
 import { openDirections, openExternalUrl, shareSpace } from '@/lib/links';
 import { CATEGORY_META, colors } from '@/lib/theme';
-import type { SpaceDetails } from '@/types/space';
+import type { ReviewPhoto, SpaceDetails } from '@/types/space';
+
+const GALLERY_COLUMNS = 4;
+const GALLERY_GAP = 8;
+const GALLERY_HORIZONTAL_INSET = 16 * 2 + 20 * 2;
 
 export default function SpaceDetailsScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const { userId } = useAuth();
+  const { width } = useWindowDimensions();
+  const scrollRef = useRef<ScrollView>(null);
+  const reviewsOffset = useRef(0);
+  const reviewOffsets = useRef<Record<string, number>>({});
   const [space, setSpace] = useState<SpaceDetails | null>(null);
+  const [photos, setPhotos] = useState<ReviewPhoto[]>([]);
+  const [viewerIndex, setViewerIndex] = useState<number | null>(null);
   const [isLoading, setIsLoading] = useState(true);
 
   const loadSpace = useCallback(async () => {
     try {
       if (!id) return;
-      setSpace(await getSpaceDetails(id, userId));
+      const [details, spacePhotos] = await Promise.all([getSpaceDetails(id, userId), listSpacePhotos(id)]);
+      setSpace(details);
+      setPhotos(details ? spacePhotos : []);
     } catch {
       Alert.alert('Space Error', 'Could not load this space.');
     } finally {
@@ -83,10 +97,21 @@ export default function SpaceDetailsScreen() {
     ...(space.website ? [{ key: 'web', label: 'Website', icon: ExternalLink, onPress: () => openExternalUrl(space.website) }] : []),
     ...(space.phone ? [{ key: 'call', label: 'Call', icon: Phone, onPress: () => openExternalUrl(`tel:${space.phone}`) }] : []),
   ];
+  const thumbnailSize = Math.floor(
+    (Math.min(width, 640) - GALLERY_HORIZONTAL_INSET - GALLERY_GAP * (GALLERY_COLUMNS - 1)) / GALLERY_COLUMNS
+  );
+
+  const openReview = (ratingId: string) => {
+    setViewerIndex(null);
+    const offset = reviewOffsets.current[ratingId];
+    if (offset !== undefined) {
+      scrollRef.current?.scrollTo({ y: reviewsOffset.current + offset - 8, animated: true });
+    }
+  };
 
   return (
     <SafeAreaView edges={['bottom']} className="flex-1 bg-slate-50">
-      <ScrollView contentContainerStyle={{ padding: 16, paddingTop: 4, paddingBottom: 32 }}>
+      <ScrollView ref={scrollRef} contentContainerStyle={{ padding: 16, paddingTop: 4, paddingBottom: 32 }}>
         <View className="bg-white rounded-3xl border border-slate-200 overflow-hidden">
           <View style={{ backgroundColor: meta.tint }} className="px-5 pt-5 pb-4">
             <View className="flex-row items-start">
@@ -147,6 +172,23 @@ export default function SpaceDetailsScreen() {
           </View>
         )}
 
+        {photos.length > 0 && (
+          <View className="mt-3 bg-white rounded-3xl border border-slate-200 p-5">
+            <View className="flex-row items-center mb-3">
+              <Text className="text-[17px] font-bold text-ink flex-1">Photos</Text>
+              <TouchableOpacity onPress={() => setViewerIndex(0)} activeOpacity={0.7} hitSlop={8}>
+                <Text className="text-sm font-semibold text-primary">See all {photos.length}</Text>
+              </TouchableOpacity>
+            </View>
+            <PhotoGrid
+              photos={photos}
+              size={thumbnailSize}
+              maxVisible={GALLERY_COLUMNS * 2}
+              onPressPhoto={setViewerIndex}
+            />
+          </View>
+        )}
+
         <TouchableOpacity
           onPress={() => router.push({ pathname: '/rank', params: { spaceId: space.id } } as never)}
           activeOpacity={0.85}
@@ -174,13 +216,22 @@ export default function SpaceDetailsScreen() {
             body="Be the first to share what this spot is like."
           />
         ) : (
-          <View className="gap-3">
+          <View className="gap-3" onLayout={(event) => { reviewsOffset.current = event.nativeEvent.layout.y; }}>
             {space.reviews.map((review) => (
-              <FeedCard key={review.id} item={review} showSpace={false} />
+              <View key={review.id} onLayout={(event) => { reviewOffsets.current[review.id] = event.nativeEvent.layout.y; }}>
+                <FeedCard item={review} showSpace={false} />
+              </View>
             ))}
           </View>
         )}
       </ScrollView>
+
+      <PhotoViewer
+        photos={photos}
+        initialIndex={viewerIndex}
+        onClose={() => setViewerIndex(null)}
+        onOpenReview={openReview}
+      />
     </SafeAreaView>
   );
 }

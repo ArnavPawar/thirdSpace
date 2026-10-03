@@ -419,6 +419,19 @@ export interface SpaceWithAttributes extends ThirdSpace {
   current_user_favorited?: boolean;
 }
 
+export interface ReviewPhoto {
+  id: string;
+  user_id: string;
+  space_id: string;
+  rating_id?: string;
+  comment_id?: string;
+  url: string;
+  width?: number;
+  height?: number;
+  created_at: string;
+  profile?: Profile;
+}
+
 export interface ReviewComment {
   id: string;
   rating_id: string;
@@ -426,12 +439,14 @@ export interface ReviewComment {
   body: string;
   created_at: string;
   profile?: Profile;
+  photos?: ReviewPhoto[];
 }
 
 export interface FeedActivity extends UserRating {
   space: SpaceWithAttributes;
   profile: Profile;
   is_following?: boolean;
+  photos?: ReviewPhoto[];
 }
 
 export interface ProfileStats {
@@ -464,7 +479,16 @@ export interface SubmitRatingInput {
     Partial<Pick<ThirdSpace, 'id' | 'description' | 'website' | 'phone' | 'hours'>>;
   rating: RatingFormData;
   secret?: { area_hint?: string };
+  photos?: LocalPhoto[];
 }
+
+export interface LocalPhoto {
+  uri: string;
+  width?: number;
+  height?: number;
+}
+
+export const MAX_PHOTOS_PER_POST = 4;
 
 export interface RatingHistoryEntry {
   category: SpaceCategory;
