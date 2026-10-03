@@ -4,7 +4,10 @@ import {
   normalizePurposeForCategory,
   sanitizeAttributeScores,
   type AttributeScores,
+  type CalendarOccurrence,
   type CategoryPurpose,
+  type EventKind,
+  type EventSourceType,
   type FeedActivity,
   type Profile,
   type ProfileWithStats,
@@ -16,6 +19,7 @@ import {
   type SecretSpotRequest,
   type SpaceCategory,
   type SpaceDetails,
+  type SpaceEvent,
   type SpaceWithAttributes,
   type SubmitRatingInput,
   type UserRanking,
@@ -32,6 +36,17 @@ import {
   demoSecretSpaces,
   demoSpaces,
 } from './fixtures';
+import {
+  buildEventRows,
+  expandEventDates,
+  extractEvents,
+  getMonthRange,
+  toDateKey,
+  WEEKLY_LIFETIME_DAYS,
+  WEEKLY_LOOKBACK_DAYS,
+  type EventRow,
+  type EventSource,
+} from './events';
 import { isSupabaseConfigured, supabase } from './supabase';
 
 type RankingWithSpace = UserRanking & { space: SpaceWithAttributes };
@@ -58,7 +73,10 @@ const localState = {
   secretAccess: new Set(demoSecretAccess),
   secretRequests: [...demoSecretRequests],
   sessionRatings: {} as Record<string, number>,
+  events: null as SpaceEvent[] | null,
 };
+
+const eventCache = new Map<string, CalendarOccurrence[]>();
 
 const toIso = () => new Date().toISOString();
 const createId = (prefix: string) => `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
@@ -360,6 +378,7 @@ export async function submitRating(userId: string, input: SubmitRatingInput): Pr
     : {};
 
   if (!canUseUserScopedRemote(userId)) {
+    const existingEvents = getLocalEvents();
     const existingSpace = localState.spaces.find((space) =>
       space.id === input.space.id ||
       (space.name.toLowerCase() === input.space.name.toLowerCase() &&
@@ -388,8 +407,21 @@ export async function submitRating(userId: string, input: SubmitRatingInput): Pr
       localState.spaces.unshift(space);
     }
 
+    const ratingId = createId('rating');
+    const profile = findLocalProfile(userId) || demoProfiles[0];
+    const newEvents = [
+      ...extractSpaceEvents(input.rating.review_text, {
+        source_type: 'rating', source_id: ratingId, space_id: space.id, source_user_id: userId, source_created_at: timestamp,
+      }, space, profile),
+      ...(!existingSpace ? extractSpaceEvents(spaceEventText(space), {
+        source_type: 'space', source_id: space.id, space_id: space.id, source_created_at: timestamp,
+      }, space) : []),
+    ];
+    localState.events = [...existingEvents, ...newEvents];
+    eventCache.clear();
+
     localState.feed.unshift({
-      id: createId('rating'),
+      id: ratingId,
       user_id: userId,
       space_id: space.id,
       category,
@@ -402,7 +434,7 @@ export async function submitRating(userId: string, input: SubmitRatingInput): Pr
       current_user_liked: false,
       created_at: timestamp,
       space,
-      profile: findLocalProfile(userId) || demoProfiles[0],
+      profile,
     });
     localState.sessionRatings[userId] = (localState.sessionRatings[userId] || 0) + 1;
 
@@ -451,7 +483,7 @@ export async function submitRating(userId: string, input: SubmitRatingInput): Pr
 
   if (spaceError) throw spaceError;
 
-  const { error: ratingError } = await supabase.from('ratings').insert({
+  const { data: ratingRow, error: ratingError } = await supabase.from('ratings').insert({
     user_id: userId,
     space_id: spaceRow.id,
     category,
@@ -459,9 +491,28 @@ export async function submitRating(userId: string, input: SubmitRatingInput): Pr
     attribute_scores: attributeScores,
     overall_score: overallScore,
     review_text: input.rating.review_text,
-  });
+  }).select('id, created_at').single();
 
   if (ratingError) throw ratingError;
+
+  if (!spaceRow.is_secret) {
+    await saveRemoteEventRows([
+      ...buildEventRows(extractEvents(input.rating.review_text, ratingRow.created_at), {
+        source_type: 'rating',
+        source_id: String(ratingRow.id),
+        space_id: spaceRow.id,
+        source_user_id: userId,
+        source_created_at: ratingRow.created_at,
+      }),
+      ...buildEventRows(extractEvents(spaceEventText(spaceRow), spaceRow.updated_at), {
+        source_type: 'space',
+        source_id: spaceRow.id,
+        space_id: spaceRow.id,
+        source_created_at: spaceRow.updated_at,
+      }),
+    ]);
+  }
+  eventCache.clear();
 
   const { data: spaceRatings, error: spaceRatingsError } = await supabase
     .from('ratings')
@@ -1090,4 +1141,182 @@ export async function respondToSecretRequest(
 
   const { error } = await supabase.rpc('respond_secret_request', { request_id: request.id, accept });
   if (error) throw error;
+}
+
+type EventQuery = {
+  monthStart: Date;
+  center: { latitude: number; longitude: number };
+  radiusMiles: number;
+  force?: boolean;
+};
+
+const MILES_PER_DEGREE_LATITUDE = 69;
+
+const spaceEventText = (space: { description?: string | null; hours?: string | null }) =>
+  [space.description, space.hours].filter(Boolean).join('. ');
+
+const rowToSpaceEvent = (
+  row: Omit<EventRow, 'dedupe_key'> & { id?: string; created_at?: string },
+  space: SpaceWithAttributes,
+  profile?: Profile
+): SpaceEvent => ({
+  id: row.id || `event-${row.source_type}-${row.source_id}-${row.kind}-${row.title}-${row.event_date ?? row.weekday}`,
+  space_id: row.space_id,
+  source_type: row.source_type,
+  source_id: row.source_id,
+  source_user_id: row.source_user_id || undefined,
+  title: row.title,
+  kind: row.kind,
+  event_date: row.event_date || undefined,
+  weekday: row.weekday ?? undefined,
+  start_time: row.start_time || undefined,
+  link_url: row.link_url || undefined,
+  snippet: row.snippet,
+  source_created_at: row.source_created_at,
+  created_at: row.created_at || row.source_created_at,
+  space,
+  profile,
+});
+
+function extractSpaceEvents(
+  text: string | undefined,
+  source: EventSource,
+  space: SpaceWithAttributes,
+  profile?: Profile
+): SpaceEvent[] {
+  if (space.is_secret) return [];
+  return buildEventRows(extractEvents(text, source.source_created_at), source).map((row) => rowToSpaceEvent(row, space, profile));
+}
+
+function getLocalEvents(): SpaceEvent[] {
+  if (!localState.events) {
+    localState.events = [
+      ...localState.feed.flatMap((activity) => extractSpaceEvents(activity.review_text, {
+        source_type: 'rating',
+        source_id: activity.id,
+        space_id: activity.space_id,
+        source_user_id: activity.user_id,
+        source_created_at: activity.created_at,
+      }, activity.space, findLocalProfile(activity.user_id) || activity.profile)),
+      ...localState.spaces.flatMap((space) => extractSpaceEvents(spaceEventText(space), {
+        source_type: 'space',
+        source_id: space.id,
+        space_id: space.id,
+        source_created_at: space.updated_at,
+      }, space)),
+    ];
+  }
+  return localState.events;
+}
+
+async function saveRemoteEventRows(rows: EventRow[]): Promise<void> {
+  if (rows.length === 0 || !supabase) return;
+  const { error } = await supabase
+    .from('space_events')
+    .upsert(rows, { onConflict: 'source_type,source_id,dedupe_key', ignoreDuplicates: true });
+  if (error) console.warn('Could not save extracted events:', error.message);
+}
+
+async function fetchRemoteEvents(query: EventQuery): Promise<SpaceEvent[] | null> {
+  if (!isSupabaseConfigured || !supabase) return null;
+
+  const { start, end, startKey, endKey } = getMonthRange(query.monthStart);
+  const latitudeDelta = query.radiusMiles / MILES_PER_DEGREE_LATITUDE;
+  const longitudeDelta = query.radiusMiles /
+    (MILES_PER_DEGREE_LATITUDE * Math.max(0.1, Math.cos(query.center.latitude * (Math.PI / 180))));
+  const weeklyFrom = toDateKey(new Date(start.getFullYear(), start.getMonth(), start.getDate() - WEEKLY_LIFETIME_DAYS));
+  const weeklyTo = toDateKey(new Date(end.getFullYear(), end.getMonth(), end.getDate() + WEEKLY_LOOKBACK_DAYS + 1));
+
+  const { data, error } = await supabase
+    .from('space_events')
+    .select('*, spaces!inner(*)')
+    .gte('spaces.latitude', query.center.latitude - latitudeDelta)
+    .lte('spaces.latitude', query.center.latitude + latitudeDelta)
+    .gte('spaces.longitude', query.center.longitude - longitudeDelta)
+    .lte('spaces.longitude', query.center.longitude + longitudeDelta)
+    .or(
+      `and(kind.eq.one_time,event_date.gte.${startKey},event_date.lte.${endKey}),` +
+      `and(kind.eq.weekly,source_created_at.gte.${weeklyFrom},source_created_at.lte.${weeklyTo})`
+    )
+    .limit(500);
+
+  if (error) {
+    console.warn('Falling back to demo events after Supabase error:', error.message);
+    return null;
+  }
+
+  const rows = (data || []) as Record<string, unknown>[];
+  const profilesByUserId = await fetchProfilesByUserId(
+    Array.from(new Set(rows.map((row) => row.source_user_id).filter(Boolean).map(String)))
+  );
+
+  return rows.map((row) => rowToSpaceEvent({
+    id: String(row.id),
+    space_id: String(row.space_id),
+    source_type: row.source_type as EventSourceType,
+    source_id: String(row.source_id),
+    source_user_id: (row.source_user_id as string | null) || undefined,
+    title: String(row.title),
+    kind: row.kind as EventKind,
+    event_date: (row.event_date as string | null) ?? null,
+    weekday: row.weekday === null || row.weekday === undefined ? null : Number(row.weekday),
+    start_time: (row.start_time as string | null) ?? null,
+    link_url: (row.link_url as string | null) ?? null,
+    snippet: String(row.snippet),
+    source_created_at: String(row.source_created_at),
+    created_at: String(row.created_at),
+  }, mapSpaceRow(row.spaces as Record<string, unknown>), profilesByUserId[String(row.source_user_id)]));
+}
+
+function buildOccurrences(events: SpaceEvent[], query: EventQuery): CalendarOccurrence[] {
+  const byKey = new Map<string, CalendarOccurrence>();
+
+  events.forEach((event) => {
+    if (event.space.is_secret) return;
+    const distance = calculateDistanceMiles(query.center, event.space);
+    if (distance > query.radiusMiles) return;
+
+    expandEventDates(event, query.monthStart).forEach((date) => {
+      const key = `${event.space_id}|${event.title}|${date}`;
+      const existing = byKey.get(key);
+      if (!existing) {
+        byKey.set(key, { key, date, event, distance, mention_count: 1 });
+        return;
+      }
+
+      existing.mention_count += 1;
+      const isRicher = Number(Boolean(event.link_url)) + Number(Boolean(event.start_time)) >
+        Number(Boolean(existing.event.link_url)) + Number(Boolean(existing.event.start_time));
+      if (isRicher) existing.event = event;
+    });
+  });
+
+  return Array.from(byKey.values()).sort((first, second) =>
+    first.date.localeCompare(second.date) ||
+    (first.event.start_time || '99:99').localeCompare(second.event.start_time || '99:99') ||
+    (first.distance || 0) - (second.distance || 0)
+  );
+}
+
+export async function listEventsNearby(query: EventQuery): Promise<CalendarOccurrence[]> {
+  const cacheKey = [
+    getMonthRange(query.monthStart).startKey,
+    query.center.latitude.toFixed(3),
+    query.center.longitude.toFixed(3),
+    query.radiusMiles,
+  ].join('|');
+
+  const cached = eventCache.get(cacheKey);
+  if (cached && !query.force) return cached;
+
+  const localEvents = getLocalEvents();
+  const remoteEvents = await fetchRemoteEvents(query);
+  const remoteIds = new Set((remoteEvents || []).map((event) => event.id));
+  const events = remoteEvents
+    ? [...remoteEvents, ...localEvents.filter((event) => !remoteIds.has(event.id))]
+    : localEvents;
+
+  const occurrences = buildOccurrences(events, query);
+  eventCache.set(cacheKey, occurrences);
+  return occurrences;
 }

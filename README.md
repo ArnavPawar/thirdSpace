@@ -38,8 +38,9 @@ npm install
 2. Run the SQL schema in `supabase/schema.sql` in your Supabase SQL Editor
 3. Run `supabase/secret-spots-and-vibes.sql` to enable secret spots (Gatekeeper mode) and Vibe titles
 4. Run `supabase/social-auth.sql` so Apple/Google/Facebook sign-ups always get a unique profile
-5. In Authentication → URL Configuration, add `thirdspace://**` and `exp://**` to Redirect URLs
-6. Update your `.env` file with the project URL and anon key
+5. Run `supabase/events.sql` to enable the community events calendar. To pull events out of reviews written before this table existed, set `SUPABASE_SERVICE_ROLE_KEY` in `.env` and run `npm run backfill:events`
+6. In Authentication → URL Configuration, add `thirdspace://**` and `exp://**` to Redirect URLs
+7. Update your `.env` file with the project URL and anon key
 
 ### 4. Run the App
 

@@ -12,6 +12,15 @@ import {
 
 const now = new Date().toISOString();
 
+const MONTH_NAMES = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+const daysAgo = (days: number) => new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString();
+// Demo event reviews mention dates relative to today so the calendar always has something to show.
+const dayFromNow = (offset: number) => {
+  const date = new Date();
+  date.setDate(date.getDate() + offset);
+  return `${MONTH_NAMES[date.getMonth()]} ${date.getDate()}`;
+};
+
 const buildAttributes = (
   id: string,
   spaceId: string,
@@ -169,7 +178,7 @@ export const demoSpaces: SpaceWithAttributes[] = [
     address: '925 N Garfield St, Arlington, VA 22201',
     latitude: 38.8839,
     longitude: -77.0948,
-    description: 'Board-game bar with a deep game library and easy group tables.',
+    description: 'Board-game bar with a deep game library and easy group tables. Karaoke Friday nights from 9pm.',
     website: 'https://theboardroomva.com',
     phone: '+17032434075',
     hours: 'Tue-Thu 4pm-11pm, Fri-Sat 12pm-1am, Sun 12pm-10pm',
@@ -417,6 +426,90 @@ export const demoFeed: FeedActivity[] = [
     space: demoSecretSpaces[2],
     profile: demoProfiles[2],
     is_following: false,
+  },
+  {
+    id: 'rating-7',
+    user_id: 'user-mike',
+    space_id: demoSpaces[3].id,
+    category: 'Interactive Fun (Arcades, Board Games)',
+    primary_purpose: 'Group Games',
+    attribute_scores: demoSpaces[3].attributes!.attribute_scores,
+    overall_score: demoSpaces[3].attributes!.overall_score,
+    review_text: `Trivia every Tuesday at 8pm and the hosts are hilarious. Teams of up to six, show up early. Comedy night on ${dayFromNow(35)} at 9pm too.`,
+    likes_count: 14,
+    comments_count: 0,
+    current_user_liked: false,
+    created_at: daysAgo(3),
+    space: demoSpaces[3],
+    profile: demoProfiles[1],
+    is_following: true,
+  },
+  {
+    id: 'rating-8',
+    user_id: 'user-nina',
+    space_id: demoSpaces[0].id,
+    category: 'Cafe & Coworking',
+    primary_purpose: 'Casual Hangout',
+    attribute_scores: demoSpaces[0].attributes!.attribute_scores,
+    overall_score: demoSpaces[0].attributes!.overall_score,
+    review_text: `Open mic night on ${dayFromNow(9)} at 7:30pm, sign-ups at instagram.com/northsidesocial. Bring a friend!`,
+    likes_count: 7,
+    comments_count: 0,
+    current_user_liked: false,
+    created_at: daysAgo(1),
+    space: demoSpaces[0],
+    profile: demoProfiles[3],
+    is_following: true,
+  },
+  {
+    id: 'rating-9',
+    user_id: 'user-emma',
+    space_id: demoSpaces[2].id,
+    category: 'Public Architecture (Atriums, Hotel Lobbies)',
+    primary_purpose: 'Rest Break',
+    attribute_scores: demoSpaces[2].attributes!.attribute_scores,
+    overall_score: demoSpaces[2].attributes!.overall_score,
+    review_text: 'They host a book club in the atrium. Next one is this Saturday at 2pm, totally free.',
+    likes_count: 5,
+    comments_count: 0,
+    current_user_liked: false,
+    created_at: daysAgo(2),
+    space: demoSpaces[2],
+    profile: demoProfiles[2],
+    is_following: false,
+  },
+  {
+    id: 'rating-10',
+    user_id: demoCurrentUserId,
+    space_id: demoSpaces[1].id,
+    category: 'Park & Nature',
+    primary_purpose: 'Walking',
+    attribute_scores: demoSpaces[1].attributes!.attribute_scores,
+    overall_score: demoSpaces[1].attributes!.overall_score,
+    review_text: `Farmers market every Saturday morning from 9am. Also a jazz night on ${dayFromNow(16)} at 7pm, see crystalcity.org/events for the lineup.`,
+    likes_count: 11,
+    comments_count: 0,
+    current_user_liked: false,
+    created_at: daysAgo(4),
+    space: demoSpaces[1],
+    profile: demoProfiles[0],
+  },
+  {
+    id: 'rating-11',
+    user_id: 'user-mike',
+    space_id: demoSpaces[4].id,
+    category: 'Smoke & Sunset Spots',
+    primary_purpose: 'Sunset Watch',
+    attribute_scores: demoSpaces[4].attributes!.attribute_scores,
+    overall_score: demoSpaces[4].attributes!.overall_score,
+    review_text: "Run club meets here every Thursday at 6:30pm for a sunset loop. Everyone's welcome.",
+    likes_count: 9,
+    comments_count: 0,
+    current_user_liked: false,
+    created_at: daysAgo(5),
+    space: demoSpaces[4],
+    profile: demoProfiles[1],
+    is_following: true,
   },
 ];
 

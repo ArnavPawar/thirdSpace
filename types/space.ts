@@ -472,6 +472,36 @@ export interface RatingHistoryEntry {
   created_at: string;
 }
 
+export type EventKind = 'one_time' | 'weekly';
+export type EventSourceType = 'rating' | 'space';
+
+export interface SpaceEvent {
+  id: string;
+  space_id: string;
+  source_type: EventSourceType;
+  source_id: string;
+  source_user_id?: string;
+  title: string;
+  kind: EventKind;
+  event_date?: string; // YYYY-MM-DD, one_time only
+  weekday?: number; // 0 = Sunday, weekly only
+  start_time?: string; // HH:MM, 24h
+  link_url?: string;
+  snippet: string;
+  source_created_at: string;
+  created_at: string;
+  space: SpaceWithAttributes;
+  profile?: Profile;
+}
+
+export interface CalendarOccurrence {
+  key: string;
+  date: string; // YYYY-MM-DD
+  event: SpaceEvent;
+  distance?: number;
+  mention_count: number;
+}
+
 export type SecretAccessStatus = 'owner' | 'unlocked' | 'pending' | 'locked';
 
 export interface SecretSpotPreview {
