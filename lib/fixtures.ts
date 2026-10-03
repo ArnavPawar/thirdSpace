@@ -5,6 +5,7 @@ import {
   type Profile,
   type ProfileWithStats,
   type ReviewComment,
+  type ReviewPhoto,
   type SecretSpotRequest,
   type SpaceWithAttributes,
   type UserRanking,
@@ -530,6 +531,52 @@ export const demoComments: ReviewComment[] = [
     created_at: '2026-05-25T13:00:00Z',
     profile: demoProfiles[3],
   },
+];
+
+const unsplashUrl = (photoId: string) => `https://images.unsplash.com/photo-${photoId}?w=1600&q=75&fm=jpg&fit=max`;
+
+const buildDemoPhoto = (
+  id: string,
+  owner: { ratingId: string } | { commentId: string },
+  photoId: string,
+  height: number
+): ReviewPhoto => {
+  const ratingId = 'ratingId' in owner
+    ? owner.ratingId
+    : demoComments.find((comment) => comment.id === owner.commentId)!.rating_id;
+  const rating = demoFeed.find((activity) => activity.id === ratingId)!;
+  const comment = 'commentId' in owner ? demoComments.find((item) => item.id === owner.commentId)! : undefined;
+
+  return {
+    id,
+    user_id: comment?.user_id ?? rating.user_id,
+    space_id: rating.space_id,
+    rating_id: comment ? undefined : rating.id,
+    comment_id: comment?.id,
+    url: unsplashUrl(photoId),
+    width: 1600,
+    height,
+    created_at: comment?.created_at ?? rating.created_at,
+    profile: comment?.profile ?? rating.profile,
+  };
+};
+
+export const demoPhotos: ReviewPhoto[] = [
+  buildDemoPhoto('photo-1', { ratingId: 'rating-1' }, '1554118811-1e0d58224f24', 1096),
+  buildDemoPhoto('photo-2', { ratingId: 'rating-1' }, '1495474472287-4d71bcdd2085', 1068),
+  buildDemoPhoto('photo-3', { commentId: 'comment-1' }, '1521017432531-fbd92d768814', 1068),
+  buildDemoPhoto('photo-4', { ratingId: 'rating-8' }, '1501339847302-ac426a4a7cbb', 1056),
+  buildDemoPhoto('photo-5', { ratingId: 'rating-2' }, '1610890716171-6b1bb98ffd09', 900),
+  buildDemoPhoto('photo-6', { ratingId: 'rating-2' }, '1606167668584-78701c57f13d', 1068),
+  buildDemoPhoto('photo-7', { ratingId: 'rating-3' }, '1568667256549-094345857637', 2240),
+  buildDemoPhoto('photo-8', { ratingId: 'rating-3' }, '1521587760476-6c12a4b040da', 1068),
+  buildDemoPhoto('photo-9', { ratingId: 'rating-9' }, '1507842217343-583bb7270b66', 940),
+  buildDemoPhoto('photo-10', { ratingId: 'rating-4' }, '1514565131-fce0801e5785', 972),
+  buildDemoPhoto('photo-11', { ratingId: 'rating-4' }, '1436491865332-7a61a109cc05', 1064),
+  buildDemoPhoto('photo-12', { ratingId: 'rating-11' }, '1495616811223-4d98c6e9c869', 900),
+  buildDemoPhoto('photo-13', { ratingId: 'rating-10' }, '1490750967868-88aa4486c946', 1068),
+  buildDemoPhoto('photo-14', { ratingId: 'rating-10' }, '1529156069898-49953e39b3ac', 900),
+  buildDemoPhoto('photo-15', { ratingId: 'rating-5' }, '1477959858617-67f85cf4f1df', 984),
 ];
 
 export const demoRankings: (UserRanking & { space: SpaceWithAttributes })[] = [

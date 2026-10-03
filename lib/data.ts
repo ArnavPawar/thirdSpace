@@ -9,10 +9,12 @@ import {
   type EventKind,
   type EventSourceType,
   type FeedActivity,
+  type LocalPhoto,
   type Profile,
   type ProfileWithStats,
   type RatingHistoryEntry,
   type ReviewComment,
+  type ReviewPhoto,
   type SecretAccessStatus,
   type SecretRequestKind,
   type SecretSpotPreview,
@@ -28,6 +30,7 @@ import {
   demoComments,
   demoCurrentUserId,
   demoFeed,
+  demoPhotos,
   demoProfile,
   demoProfiles,
   demoRankings,
@@ -47,6 +50,7 @@ import {
   type EventRow,
   type EventSource,
 } from './events';
+import { ImageManipulator, SaveFormat } from 'expo-image-manipulator';
 import { isSupabaseConfigured, supabase } from './supabase';
 
 type RankingWithSpace = UserRanking & { space: SpaceWithAttributes };
@@ -74,7 +78,12 @@ const localState = {
   secretRequests: [...demoSecretRequests],
   sessionRatings: {} as Record<string, number>,
   events: null as SpaceEvent[] | null,
+  photos: [...demoPhotos],
 };
+
+const PHOTO_BUCKET = 'review-photos';
+const PHOTO_MAX_EDGE = 1600;
+const PHOTO_QUALITY = 0.7;
 
 const eventCache = new Map<string, CalendarOccurrence[]>();
 
@@ -298,6 +307,10 @@ export async function listRecentActivity(options: FeedOptions = {}): Promise<Fee
   const profileIds = Array.from(new Set(visibleRows.map((row) => String(row.user_id))));
   const profilesByUserId = await fetchProfilesByUserId(profileIds);
   const followingIds = await fetchFollowingIds(currentUserId);
+  const photosByRatingId = groupPhotosBy(
+    await fetchRemotePhotos('rating_id', visibleRows.map((row) => String(row.id))),
+    'rating_id'
+  );
 
   const remoteFeed = visibleRows.map((rawRow) => {
     const spaceRow = rawRow.spaces as Record<string, unknown>;
@@ -318,6 +331,7 @@ export async function listRecentActivity(options: FeedOptions = {}): Promise<Fee
       created_at: String(rawRow.created_at),
       space: mapSpaceWithAttributesRow(spaceRow),
       profile,
+      photos: photosByRatingId[String(rawRow.id)] || [],
     };
   });
 
@@ -334,6 +348,7 @@ function listRecentActivityFromDemo(viewerId: string): FeedActivity[] {
       profile: findLocalProfile(activity.user_id) || activity.profile,
       is_following: localState.following.has(activity.user_id),
       comments_count: localState.comments.filter((comment) => comment.rating_id === activity.id).length,
+      photos: localState.photos.filter((photo) => photo.rating_id === activity.id),
     }));
 }
 
@@ -353,6 +368,128 @@ function filterFeedByScope(feed: FeedActivity[], scope: FeedScope): FeedActivity
   return feed.filter((activity) => activity.is_following);
 }
 
+// Seeded demo rows store a full external URL instead of a bucket path.
+const resolvePhotoUrl = (storagePath: string) =>
+  /^https?:\/\//.test(storagePath)
+    ? storagePath
+    : supabase.storage.from(PHOTO_BUCKET).getPublicUrl(storagePath).data.publicUrl;
+
+const mapPhotoRow = (row: Record<string, unknown>, profile?: Profile): ReviewPhoto => ({
+  id: String(row.id),
+  user_id: String(row.user_id),
+  space_id: String(row.space_id),
+  rating_id: (row.rating_id as string | null) || undefined,
+  comment_id: (row.comment_id as string | null) || undefined,
+  url: resolvePhotoUrl(String(row.storage_path)),
+  width: row.width === null || row.width === undefined ? undefined : Number(row.width),
+  height: row.height === null || row.height === undefined ? undefined : Number(row.height),
+  created_at: String(row.created_at),
+  profile,
+});
+
+const groupPhotosBy = (photos: ReviewPhoto[], key: 'rating_id' | 'comment_id') =>
+  photos.reduce<Record<string, ReviewPhoto[]>>((groups, photo) => {
+    const groupId = photo[key];
+    if (groupId) (groups[groupId] ||= []).push(photo);
+    return groups;
+  }, {});
+
+// Errors return [] so the feed still loads before review-photos.sql has been run.
+async function fetchRemotePhotos(column: 'rating_id' | 'comment_id' | 'space_id', ids: string[]): Promise<ReviewPhoto[]> {
+  const validIds = ids.filter(isUuid);
+  if (!isSupabaseConfigured || !supabase || validIds.length === 0) return [];
+
+  const { data, error } = await supabase
+    .from('review_photos')
+    .select('*')
+    .in(column, validIds)
+    .order('created_at', { ascending: column !== 'space_id' })
+    .limit(200);
+
+  if (error) return [];
+
+  const rows = (data || []) as Record<string, unknown>[];
+  const profilesByUserId = await fetchProfilesByUserId(Array.from(new Set(rows.map((row) => String(row.user_id)))));
+  return rows.map((row) => mapPhotoRow(row, profilesByUserId[String(row.user_id)]));
+}
+
+async function preparePhoto(photo: LocalPhoto): Promise<LocalPhoto> {
+  const context = ImageManipulator.manipulate(photo.uri);
+  const longestEdge = Math.max(photo.width || 0, photo.height || 0);
+  if (longestEdge > PHOTO_MAX_EDGE) {
+    context.resize((photo.width || 0) >= (photo.height || 0) ? { width: PHOTO_MAX_EDGE } : { height: PHOTO_MAX_EDGE });
+  }
+  const image = await context.renderAsync();
+  const result = await image.saveAsync({ compress: PHOTO_QUALITY, format: SaveFormat.JPEG });
+  return { uri: result.uri, width: result.width, height: result.height };
+}
+
+async function uploadPhoto(userId: string, photo: LocalPhoto) {
+  const prepared = await preparePhoto(photo);
+  const body = await (await fetch(prepared.uri)).arrayBuffer();
+  const storagePath = `${userId}/${Date.now()}-${Math.random().toString(36).slice(2, 10)}.jpg`;
+
+  const { error } = await supabase.storage
+    .from(PHOTO_BUCKET)
+    .upload(storagePath, body, { contentType: 'image/jpeg', upsert: false });
+  if (error) throw error;
+
+  return { storage_path: storagePath, width: prepared.width ?? null, height: prepared.height ?? null };
+}
+
+type PhotoOwner = { userId: string; spaceId: string; ratingId?: string; commentId?: string };
+
+/** Returns how many photos failed to save; the parent review or comment is already saved by then. */
+async function attachPhotos(owner: PhotoOwner, photos: LocalPhoto[] = []): Promise<number> {
+  if (photos.length === 0) return 0;
+
+  if (!canUseUserScopedRemote(owner.userId)) {
+    const timestamp = toIso();
+    localState.photos.unshift(...photos.map((photo) => ({
+      id: createId('photo'),
+      user_id: owner.userId,
+      space_id: owner.spaceId,
+      rating_id: owner.ratingId,
+      comment_id: owner.commentId,
+      url: photo.uri,
+      width: photo.width,
+      height: photo.height,
+      created_at: timestamp,
+      profile: findLocalProfile(owner.userId) || demoProfiles[0],
+    })));
+    return 0;
+  }
+
+  const uploads = await Promise.allSettled(photos.map((photo) => uploadPhoto(owner.userId, photo)));
+  const uploaded = uploads.flatMap((upload) => (upload.status === 'fulfilled' ? [upload.value] : []));
+  uploads.forEach((upload) => {
+    if (upload.status === 'rejected') console.warn('Could not upload photo:', upload.reason);
+  });
+  if (uploaded.length === 0) return photos.length;
+
+  const { error } = await supabase.from('review_photos').insert(uploaded.map((photo) => ({
+    ...photo,
+    user_id: owner.userId,
+    space_id: owner.spaceId,
+    rating_id: owner.ratingId ?? null,
+    comment_id: owner.commentId ?? null,
+  })));
+
+  if (error) {
+    console.warn('Could not save photo rows:', error.message);
+    await supabase.storage.from(PHOTO_BUCKET).remove(uploaded.map((photo) => photo.storage_path));
+    return photos.length;
+  }
+
+  return photos.length - uploaded.length;
+}
+
+export async function listSpacePhotos(spaceId: string): Promise<ReviewPhoto[]> {
+  const localPhotos = localState.photos.filter((photo) => photo.space_id === spaceId);
+  const remotePhotos = await fetchRemotePhotos('space_id', [spaceId]);
+  return byCreatedAtDesc([...remotePhotos, ...localPhotos]);
+}
+
 async function fetchProfilesByUserId(userIds: string[]): Promise<Record<string, Profile>> {
   const validUserIds = userIds.filter(isUuid);
   if (!isSupabaseConfigured || !supabase || validUserIds.length === 0) return {};
@@ -367,7 +504,7 @@ async function fetchProfilesByUserId(userIds: string[]): Promise<Record<string, 
   }, {});
 }
 
-export async function submitRating(userId: string, input: SubmitRatingInput): Promise<void> {
+export async function submitRating(userId: string, input: SubmitRatingInput): Promise<{ failedPhotos: number }> {
   const category = input.rating.category;
   const primaryPurpose = normalizePurposeForCategory(category, input.rating.primary_purpose);
   const attributeScores = sanitizeAttributeScores(input.rating.attribute_scores);
@@ -456,7 +593,8 @@ export async function submitRating(userId: string, input: SubmitRatingInput): Pr
       });
     }
 
-    return;
+    await attachPhotos({ userId, spaceId: space.id, ratingId }, input.photos);
+    return { failedPhotos: 0 };
   }
 
   const spacePayload = {
@@ -494,6 +632,11 @@ export async function submitRating(userId: string, input: SubmitRatingInput): Pr
   }).select('id, created_at').single();
 
   if (ratingError) throw ratingError;
+
+  const failedPhotos = await attachPhotos(
+    { userId, spaceId: spaceRow.id, ratingId: String(ratingRow.id) },
+    input.photos
+  );
 
   if (!spaceRow.is_secret) {
     await saveRemoteEventRows([
@@ -565,6 +708,8 @@ export async function submitRating(userId: string, input: SubmitRatingInput): Pr
 
     if (rankingError) throw rankingError;
   }
+
+  return { failedPhotos };
 }
 
 export async function getProfile(userId: string): Promise<ProfileWithStats> {
@@ -774,34 +919,50 @@ export async function toggleLike(userId: string, ratingId: string): Promise<void
   if (result.error) throw result.error;
 }
 
-export async function addComment(userId: string, ratingId: string, body: string): Promise<void> {
+export async function addComment(
+  userId: string,
+  rating: { id: string; space_id: string },
+  body: string,
+  photos: LocalPhoto[] = []
+): Promise<{ failedPhotos: number }> {
   const trimmedBody = body.trim();
-  if (!trimmedBody) return;
+  if (!trimmedBody) return { failedPhotos: 0 };
 
   if (!canUseUserScopedRemote(userId)) {
+    const commentId = createId('comment');
     localState.comments.unshift({
-      id: createId('comment'),
-      rating_id: ratingId,
+      id: commentId,
+      rating_id: rating.id,
       user_id: userId,
       body: trimmedBody,
       created_at: toIso(),
       profile: findLocalProfile(userId) || demoProfiles[0],
     });
-    return;
+    await attachPhotos({ userId, spaceId: rating.space_id, commentId }, photos);
+    return { failedPhotos: 0 };
   }
 
-  const { error } = await supabase.from('review_comments').insert({
-    rating_id: ratingId,
+  const { data, error } = await supabase.from('review_comments').insert({
+    rating_id: rating.id,
     user_id: userId,
     body: trimmedBody,
-  });
+  }).select('id').single();
 
   if (error) throw error;
+
+  const failedPhotos = await attachPhotos(
+    { userId, spaceId: rating.space_id, commentId: String(data.id) },
+    photos
+  );
+  return { failedPhotos };
 }
 
 export async function listComments(ratingId: string): Promise<ReviewComment[]> {
+  const listLocalComments = () => byCreatedAtDesc(localState.comments.filter((comment) => comment.rating_id === ratingId))
+    .map((comment) => ({ ...comment, photos: localState.photos.filter((photo) => photo.comment_id === comment.id) }));
+
   if (!isSupabaseConfigured || !supabase) {
-    return byCreatedAtDesc(localState.comments.filter((comment) => comment.rating_id === ratingId));
+    return listLocalComments();
   }
 
   const { data, error } = await supabase
@@ -810,21 +971,24 @@ export async function listComments(ratingId: string): Promise<ReviewComment[]> {
     .eq('rating_id', ratingId)
     .order('created_at', { ascending: false });
 
-  if (error) return byCreatedAtDesc(localState.comments.filter((comment) => comment.rating_id === ratingId));
+  if (error) return listLocalComments();
 
-  const profilesByUserId = await fetchProfilesByUserId((data || []).map((row: unknown) => String((row as Record<string, unknown>).user_id)));
+  const rows = (data || []) as Record<string, unknown>[];
+  const [profilesByUserId, commentPhotos] = await Promise.all([
+    fetchProfilesByUserId(rows.map((row) => String(row.user_id))),
+    fetchRemotePhotos('comment_id', rows.map((row) => String(row.id))),
+  ]);
+  const photosByCommentId = groupPhotosBy(commentPhotos, 'comment_id');
 
-  return (data || []).map((row: unknown) => {
-    const rawRow = row as unknown as Record<string, unknown>;
-    return {
-      id: String(rawRow.id),
-      rating_id: String(rawRow.rating_id),
-      user_id: String(rawRow.user_id),
-      body: String(rawRow.body),
-      created_at: String(rawRow.created_at),
-      profile: profilesByUserId[String(rawRow.user_id)],
-    };
-  });
+  return rows.map((rawRow) => ({
+    id: String(rawRow.id),
+    rating_id: String(rawRow.rating_id),
+    user_id: String(rawRow.user_id),
+    body: String(rawRow.body),
+    created_at: String(rawRow.created_at),
+    profile: profilesByUserId[String(rawRow.user_id)],
+    photos: photosByCommentId[String(rawRow.id)] || [],
+  }));
 }
 
 export async function toggleFollow(_currentUserId: string, targetUserId: string): Promise<boolean> {

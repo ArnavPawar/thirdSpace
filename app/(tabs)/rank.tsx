@@ -17,6 +17,7 @@ import MapView, { Marker } from 'react-native-maps';
 import type { LatLng, MapPressEvent, MarkerDragStartEndEvent, Region } from 'react-native-maps';
 import * as Location from 'expo-location';
 import { ArrowLeft, ArrowRight, Check, CircleCheck, Globe, KeyRound, LocateFixed, MapPin, Search, Send, Sparkles, X } from 'lucide-react-native';
+import PhotoPickerRow from '@/components/PhotoPickerRow';
 import VibeSlider from '@/components/VibeSlider';
 import { CategoryIcon, Chip, PrimaryButton, ProgressBar, ScorePill } from '@/components/ui';
 import { useAuth } from '@/lib/auth';
@@ -30,9 +31,11 @@ import {
   calculateOverallScore,
   CATEGORY_CONFIG,
   createDefaultAttributeScores,
+  MAX_PHOTOS_PER_POST,
   normalizePurposeForCategory,
   SPACE_CATEGORIES,
   type CategoryPurpose,
+  type LocalPhoto,
   type RatingFormData,
   type SpaceCategory,
   type SpaceWithAttributes,
@@ -108,6 +111,7 @@ export default function RateScreen() {
   const [isReverseGeocoding, setIsReverseGeocoding] = useState(false);
   const [isSecret, setIsSecret] = useState(false);
   const [areaHint, setAreaHint] = useState('');
+  const [photos, setPhotos] = useState<LocalPhoto[]>([]);
   const [spacesRated, setSpacesRated] = useState(0);
   const [ownedSecretCount, setOwnedSecretCount] = useState(0);
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -324,6 +328,7 @@ export default function RateScreen() {
     setPinCoordinate(null);
     setSearchQuery('');
     setRatings(createInitialRatings());
+    setPhotos([]);
   };
 
   const selectCategory = (category: SpaceCategory) => {
@@ -382,11 +387,18 @@ export default function RateScreen() {
     try {
       const shouldBeSecret = isSecret && !isExistingSpace;
       const before = getVibeProgress(spacesRated);
-      await submitRating(userId, {
+      const { failedPhotos } = await submitRating(userId, {
         space: selectedSpace,
         rating: ratings,
         secret: shouldBeSecret ? { area_hint: areaHint } : undefined,
+        photos,
       });
+      if (failedPhotos > 0) {
+        Alert.alert(
+          'Some photos did not upload',
+          `Your rating was posted, but ${failedPhotos} ${failedPhotos === 1 ? 'photo' : 'photos'} could not be saved.`
+        );
+      }
       const profile = await getProfile(userId);
       setSpacesRated(profile.stats.spaces_rated);
       if (shouldBeSecret) setOwnedSecretCount((count) => count + 1);
@@ -723,6 +735,12 @@ export default function RateScreen() {
                 className="bg-white border border-slate-200 rounded-2xl px-4 py-3 min-h-[96px] text-base text-ink"
                 textAlignVertical="top"
               />
+
+              <Text className="text-[15px] font-bold text-ink mt-5">Add photos</Text>
+              <Text className="text-[13px] text-slate-500 mt-0.5 mb-2">
+                Up to {MAX_PHOTOS_PER_POST}. They'll show up on this spot's page.
+              </Text>
+              <PhotoPickerRow photos={photos} onChange={setPhotos} disabled={isSubmitting} />
 
               {!isExistingSpace && (
                 <View className={`rounded-3xl p-4 mt-5 border-2 ${isSecret ? 'border-secret bg-secret/5' : 'border-slate-200 bg-white'}`}>

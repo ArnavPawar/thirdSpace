@@ -83,6 +83,22 @@ export interface Database {
           Pick<Database['public']['Tables']['review_comments']['Row'], 'rating_id' | 'user_id' | 'body'>;
         Update: Partial<Database['public']['Tables']['review_comments']['Row']>;
       };
+      review_photos: {
+        Row: {
+          id: string;
+          user_id: string;
+          space_id: string;
+          rating_id: string | null;
+          comment_id: string | null;
+          storage_path: string;
+          width: number | null;
+          height: number | null;
+          created_at: string;
+        };
+        Insert: Partial<Database['public']['Tables']['review_photos']['Row']> &
+          Pick<Database['public']['Tables']['review_photos']['Row'], 'user_id' | 'space_id' | 'storage_path'>;
+        Update: Partial<Database['public']['Tables']['review_photos']['Row']>;
+      };
       rating_likes: {
         Row: {
           rating_id: string;
