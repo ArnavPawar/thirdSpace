@@ -15,6 +15,7 @@ export const colors = {
   secretSoft: '#f5f3ff',
   like: '#e11d48',
   success: '#059669',
+  closed: '#dc2626',
   warning: '#d97706',
 };
 

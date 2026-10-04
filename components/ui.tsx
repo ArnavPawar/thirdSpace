@@ -3,6 +3,7 @@ import { ActivityIndicator, Pressable, Text, TouchableOpacity, View, type ViewSt
 import { Sparkles, type LucideIcon } from 'lucide-react-native';
 import { CATEGORY_META, colors, getAvatarColor, getScoreTone } from '@/lib/theme';
 import { getInitials } from '@/lib/format';
+import { getOpenStatus } from '@/lib/hours';
 import { findVibeIdentityByTitle } from '@/types/vibes';
 import type { SpaceCategory } from '@/types/space';
 
@@ -193,6 +194,21 @@ export function ScorePill({ score, size = 'md' }: { score: number; size?: 'sm' |
       <Text style={{ color: tone.text }} className={`font-extrabold ${size === 'sm' ? 'text-xs' : 'text-sm'}`}>
         {score}
       </Text>
+    </View>
+  );
+}
+
+export function OpenStatusBadge({ hours, showDetail = true }: { hours?: string; showDetail?: boolean }) {
+  const status = getOpenStatus(hours);
+  if (!status) return null;
+  const tone = status.isOpen ? colors.success : colors.closed;
+  return (
+    <View className="flex-row items-center">
+      <View style={{ backgroundColor: tone }} className="w-2 h-2 rounded-full" />
+      <Text style={{ color: tone }} className="text-[13px] font-bold ml-1.5">{status.isOpen ? 'Open now' : 'Closed'}</Text>
+      {showDetail && status.detail && (
+        <Text numberOfLines={1} className="text-[13px] text-slate-500 flex-shrink"> · {status.detail}</Text>
+      )}
     </View>
   );
 }

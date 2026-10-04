@@ -16,13 +16,13 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import MapView, { Circle, Marker, type Region } from 'react-native-maps';
 import * as Location from 'expo-location';
 import { router, useFocusEffect, useLocalSearchParams } from 'expo-router';
-import { Clock, Globe, KeyRound, LocateFixed, Lock, Navigation, Search, Users, X } from 'lucide-react-native';
+import { Clock, Globe, Heart, KeyRound, LocateFixed, Lock, Navigation, Search, Users, X } from 'lucide-react-native';
 import SecretSpotSheet from '@/components/SecretSpotSheet';
-import { Avatar, CategoryIcon, Chip, ScorePill, SegmentedControl } from '@/components/ui';
+import { Avatar, CategoryIcon, Chip, OpenStatusBadge, ScorePill, SegmentedControl } from '@/components/ui';
 import { useAuth } from '@/lib/auth';
-import { listRecentActivity, listSecretSpots, listSpaces } from '@/lib/data';
+import { listRecentActivity, listSecretSpots, listSpaces, toggleFavorite } from '@/lib/data';
 import { formatDistance, formatTimeAgo, getDisplayName } from '@/lib/format';
-import { openDirections } from '@/lib/links';
+import { openDirections, openProfile } from '@/lib/links';
 import { rankSearchResults, type SearchFields } from '@/lib/search';
 import { CATEGORY_META, colors } from '@/lib/theme';
 import {
@@ -271,6 +271,19 @@ export default function MapScreen() {
     }
   };
 
+  const handleToggleFavorite = async (space: SpaceWithAttributes) => {
+    const setFavorited = (favorited: boolean) => setSpaces((current) => current.map((item) =>
+      item.id === space.id ? { ...item, current_user_favorited: favorited } : item
+    ));
+    setFavorited(!space.current_user_favorited);
+    try {
+      await toggleFavorite(userId, space);
+    } catch {
+      setFavorited(Boolean(space.current_user_favorited));
+      Alert.alert('Save Error', 'Could not update saved spots.');
+    }
+  };
+
   const handleSecretAccessChange = (spotId: string, access: SecretAccessStatus) => {
     setSecretSpots((current) => current.map((spot) => spot.id === spotId ? { ...spot, access } : spot));
     if (access === 'unlocked') loadData();
@@ -337,6 +350,9 @@ export default function MapScreen() {
               <Text className="text-[13px] text-slate-500 mt-0.5" numberOfLines={1}>
                 {[CATEGORY_META[space.category].short, space.primary_purpose, distance].filter(Boolean).join(' · ')}
               </Text>
+              <View className="mt-0.5">
+                <OpenStatusBadge hours={space.hours} />
+              </View>
             </View>
             {space.attributes && <ScorePill score={space.attributes.overall_score} />}
           </View>
@@ -347,6 +363,18 @@ export default function MapScreen() {
             </TouchableOpacity>
             <TouchableOpacity onPress={() => router.push(`/space/${space.id}` as never)} activeOpacity={0.8} className="flex-1 h-10 rounded-xl bg-primary items-center justify-center">
               <Text className="font-semibold text-white">View spot</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              onPress={() => handleToggleFavorite(space)}
+              activeOpacity={0.8}
+              accessibilityLabel={space.current_user_favorited ? 'Remove from saved' : 'Save spot'}
+              className={`w-10 h-10 rounded-xl items-center justify-center ${space.current_user_favorited ? 'bg-rose-50' : 'bg-slate-100'}`}
+            >
+              <Heart
+                size={18}
+                color={space.current_user_favorited ? colors.like : colors.ink}
+                fill={space.current_user_favorited ? colors.like : 'transparent'}
+              />
             </TouchableOpacity>
           </View>
         </TouchableOpacity>
@@ -359,10 +387,17 @@ export default function MapScreen() {
       return (
         <TouchableOpacity activeOpacity={0.9} onPress={() => focusItem(item)} style={{ width: cardWidth, height: CARD_HEIGHT }} className={cardClass}>
           <View className="flex-row items-center">
-            <Avatar name={name} size={28} />
-            <Text className="text-[13px] text-slate-500 ml-2 flex-1" numberOfLines={1}>
-              <Text className="font-bold text-ink">{name.split(' ')[0]}</Text> rated · {formatTimeAgo(activity.created_at)}
-            </Text>
+            <TouchableOpacity
+              onPress={() => openProfile(activity.user_id, userId)}
+              activeOpacity={0.7}
+              accessibilityLabel={`View ${name}'s profile`}
+              className="flex-1 flex-row items-center"
+            >
+              <Avatar name={name} size={28} />
+              <Text className="text-[13px] text-slate-500 ml-2 flex-1" numberOfLines={1}>
+                <Text className="font-bold text-ink">{name.split(' ')[0]}</Text> rated · {formatTimeAgo(activity.created_at)}
+              </Text>
+            </TouchableOpacity>
             <ScorePill score={activity.overall_score} size="sm" />
           </View>
           <TouchableOpacity onPress={() => router.push(`/space/${activity.space.id}` as never)} activeOpacity={0.7}>

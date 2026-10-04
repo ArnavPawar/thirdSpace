@@ -10,6 +10,7 @@ import { Avatar, CategoryIcon, ScorePill, VibeTitleChip } from '@/components/ui'
 import { useAuth } from '@/lib/auth';
 import { addComment, listComments, toggleLike } from '@/lib/data';
 import { formatTimeAgo, getDisplayName } from '@/lib/format';
+import { openProfile } from '@/lib/links';
 import { CATEGORY_META, colors } from '@/lib/theme';
 import { MAX_PHOTOS_PER_POST, type FeedActivity, type LocalPhoto, type ReviewComment, type ReviewPhoto } from '@/types/space';
 
@@ -17,9 +18,10 @@ interface FeedCardProps {
   item: FeedActivity;
   onToggleFollow?: (userId: string) => void;
   showSpace?: boolean;
+  linkAuthor?: boolean;
 }
 
-export default function FeedCard({ item, onToggleFollow, showSpace = true }: FeedCardProps) {
+export default function FeedCard({ item, onToggleFollow, showSpace = true, linkAuthor = true }: FeedCardProps) {
   const { userId } = useAuth();
   const [liked, setLiked] = useState(Boolean(item.current_user_liked));
   const [likes, setLikes] = useState(item.likes_count || 0);
@@ -87,16 +89,24 @@ export default function FeedCard({ item, onToggleFollow, showSpace = true }: Fee
   return (
     <View className="bg-white rounded-3xl border border-slate-200 overflow-hidden">
       <View className="px-4 pt-4 flex-row items-center">
-        <Avatar name={name} size={40} />
-        <View className="flex-1 ml-3">
-          <View className="flex-row items-center flex-wrap">
-            <Text className="font-bold text-ink text-[15px] mr-2">{isOwnReview ? 'You' : name}</Text>
-            <VibeTitleChip title={item.profile.vibe_title} />
+        <TouchableOpacity
+          onPress={() => openProfile(item.user_id, userId)}
+          disabled={!linkAuthor}
+          activeOpacity={0.7}
+          accessibilityLabel={linkAuthor ? `View ${name}'s profile` : undefined}
+          className="flex-1 flex-row items-center"
+        >
+          <Avatar name={name} size={40} />
+          <View className="flex-1 ml-3">
+            <View className="flex-row items-center flex-wrap">
+              <Text className="font-bold text-ink text-[15px] mr-2">{isOwnReview ? 'You' : name}</Text>
+              <VibeTitleChip title={item.profile.vibe_title} />
+            </View>
+            <Text className="text-xs text-slate-400 mt-0.5">
+              {formatTimeAgo(item.created_at)} · for {item.primary_purpose}
+            </Text>
           </View>
-          <Text className="text-xs text-slate-400 mt-0.5">
-            {formatTimeAgo(item.created_at)} · for {item.primary_purpose}
-          </Text>
-        </View>
+        </TouchableOpacity>
 
         {!isOwnReview && onToggleFollow && (
           <TouchableOpacity
@@ -174,9 +184,13 @@ export default function FeedCard({ item, onToggleFollow, showSpace = true }: Fee
         <View className="px-4 pb-4">
           {(comments || []).map((comment) => (
             <View key={comment.id} className="flex-row mb-2.5">
-              <Avatar name={getDisplayName(comment.profile)} size={28} />
+              <TouchableOpacity onPress={() => openProfile(comment.user_id, userId)} activeOpacity={0.7}>
+                <Avatar name={getDisplayName(comment.profile)} size={28} />
+              </TouchableOpacity>
               <View className="flex-1 ml-2 bg-slate-50 rounded-2xl px-3 py-2">
-                <Text className="text-xs font-bold text-slate-700">{getDisplayName(comment.profile)}</Text>
+                <Text onPress={() => openProfile(comment.user_id, userId)} className="text-xs font-bold text-slate-700 self-start">
+                  {getDisplayName(comment.profile)}
+                </Text>
                 <Text className="text-sm text-slate-700 mt-0.5">{comment.body}</Text>
                 {comment.photos && comment.photos.length > 0 && (
                   <View className="mt-2">

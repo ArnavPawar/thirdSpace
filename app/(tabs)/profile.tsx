@@ -35,6 +35,7 @@ import {
   updateProfile,
 } from '@/lib/data';
 import { getDisplayName } from '@/lib/format';
+import { openProfile } from '@/lib/links';
 import { CATEGORY_META, colors } from '@/lib/theme';
 import type {
   CategoryPurpose,
@@ -504,14 +505,24 @@ export default function ProfileScreen() {
               </View>
             ) : socialProfiles.map((item) => (
               <View key={item.id} className="flex-row items-center mb-4">
-                <Avatar name={getDisplayName(item)} size={44} />
-                <View className="flex-1 ml-3">
-                  <Text className="font-bold text-ink">{getDisplayName(item)}</Text>
-                  <View className="flex-row items-center mt-0.5">
-                    <Text className="text-xs text-slate-500 mr-2">@{item.username}</Text>
-                    <VibeTitleChip title={item.vibe_title} />
+                <TouchableOpacity
+                  onPress={() => {
+                    setSocialModalType(null);
+                    openProfile(item.user_id, userId);
+                  }}
+                  activeOpacity={0.7}
+                  accessibilityLabel={`View ${getDisplayName(item)}'s profile`}
+                  className="flex-1 flex-row items-center"
+                >
+                  <Avatar name={getDisplayName(item)} size={44} />
+                  <View className="flex-1 ml-3">
+                    <Text className="font-bold text-ink">{getDisplayName(item)}</Text>
+                    <View className="flex-row items-center mt-0.5">
+                      <Text className="text-xs text-slate-500 mr-2">@{item.username}</Text>
+                      <VibeTitleChip title={item.vibe_title} />
+                    </View>
                   </View>
-                </View>
+                </TouchableOpacity>
                 <TouchableOpacity
                   onPress={() => handleToggleFollow(item.user_id)}
                   className={`px-3 h-8 rounded-full flex-row items-center ${item.is_following ? 'bg-slate-100' : 'bg-primary'}`}

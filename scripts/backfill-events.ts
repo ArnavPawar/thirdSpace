@@ -2,6 +2,7 @@
 // Usage: npm run backfill:events  (needs EXPO_PUBLIC_SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY in .env)
 // Safe to re-run; existing rows are skipped via the (source_type, source_id, dedupe_key) unique key.
 import { createClient } from '@supabase/supabase-js';
+import WebSocket from 'ws';
 import { buildEventRows, extractEvents, type EventRow } from '../lib/events';
 
 const PAGE_SIZE = 500;
@@ -13,7 +14,11 @@ if (!url || !serviceRoleKey) {
   throw new Error('Set EXPO_PUBLIC_SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY before running the backfill.');
 }
 
-const supabase = createClient(url, serviceRoleKey, { auth: { persistSession: false } });
+// Node 20 has no global WebSocket, which supabase-js requires even though this script never uses realtime.
+const supabase = createClient(url, serviceRoleKey, {
+  auth: { persistSession: false },
+  realtime: { transport: WebSocket as unknown as typeof globalThis.WebSocket },
+});
 
 type RatingRow = {
   id: string;
