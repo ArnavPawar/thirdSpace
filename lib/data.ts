@@ -65,6 +65,7 @@ type FeedScope = 'public' | 'following';
 type FeedOptions = {
   currentUserId?: string;
   scope?: FeedScope;
+  authorId?: string;
 };
 
 const localState = {
@@ -246,9 +247,10 @@ const listVisibleLocalSpaces = (viewerId: string) =>
 
 export async function listSpaces(filters: SpaceFilters = {}): Promise<SpaceWithAttributes[]> {
   const viewerId = filters.viewerId || demoCurrentUserId;
+  const favoritesPromise = fetchFavoriteStates(viewerId);
 
   if (!isSupabaseConfigured || !supabase) {
-    return applySpaceFilters(listVisibleLocalSpaces(viewerId), filters);
+    return applyFavoriteStates(applySpaceFilters(listVisibleLocalSpaces(viewerId), filters), await favoritesPromise);
   }
 
   const { data, error } = await supabase
@@ -258,12 +260,31 @@ export async function listSpaces(filters: SpaceFilters = {}): Promise<SpaceWithA
 
   if (error) {
     console.warn('Falling back to demo spaces after Supabase error:', error.message);
-    return applySpaceFilters(listVisibleLocalSpaces(viewerId), filters);
+    return applyFavoriteStates(applySpaceFilters(listVisibleLocalSpaces(viewerId), filters), await favoritesPromise);
   }
 
   const spaces = (data || []).map((row: unknown) => mapSpaceWithAttributesRow(row as Record<string, unknown>));
 
-  return applySpaceFilters(spaces, filters);
+  return applyFavoriteStates(applySpaceFilters(spaces, filters), await favoritesPromise);
+}
+
+const applyFavoriteStates = (spaces: SpaceWithAttributes[], favorites: Map<string, boolean>) =>
+  spaces.map((space) => favorites.has(space.id) ? { ...space, current_user_favorited: favorites.get(space.id) } : space);
+
+async function fetchFavoriteStates(viewerId: string): Promise<Map<string, boolean>> {
+  const localFavorites = new Map(localState.rankings
+    .filter((ranking) => ranking.user_id === viewerId)
+    .map((ranking) => [ranking.space_id, ranking.is_favorite]));
+
+  if (!canUseUserScopedRemote(viewerId)) return localFavorites;
+
+  const { data, error } = await supabase
+    .from('user_rankings')
+    .select('space_id, is_favorite')
+    .eq('user_id', viewerId);
+  if (error) return localFavorites;
+
+  return new Map(((data || []) as Record<string, unknown>[]).map((row) => [String(row.space_id), Boolean(row.is_favorite)]));
 }
 
 export async function getSpaceDetails(spaceId: string, viewerId = demoCurrentUserId): Promise<SpaceDetails | null> {
@@ -287,20 +308,26 @@ export async function getSpaceDetails(spaceId: string, viewerId = demoCurrentUse
 export async function listRecentActivity(options: FeedOptions = {}): Promise<FeedActivity[]> {
   const scope = options.scope || 'public';
   const currentUserId = options.currentUserId || demoCurrentUserId;
+  const { authorId } = options;
+  const filterFeed = (feed: FeedActivity[]) =>
+    filterFeedByScope(authorId ? feed.filter((activity) => activity.user_id === authorId) : feed, scope);
 
   if (!isSupabaseConfigured || !supabase) {
-    return filterFeedByScope(listRecentActivityFromDemo(currentUserId), scope);
+    return filterFeed(listRecentActivityFromDemo(currentUserId));
   }
 
-  const { data, error } = await supabase
+  let query = supabase
     .from('ratings')
     .select('*, spaces(*)')
     .order('created_at', { ascending: false })
     .limit(50);
+  if (authorId && isUuid(authorId)) query = query.eq('user_id', authorId);
+
+  const { data, error } = await query;
 
   if (error) {
     console.warn('Falling back to demo feed after Supabase error:', error.message);
-    return filterFeedByScope(listRecentActivityFromDemo(currentUserId), scope);
+    return filterFeed(listRecentActivityFromDemo(currentUserId));
   }
 
   const visibleRows = ((data || []) as Record<string, unknown>[]).filter((row) => Boolean(row.spaces));
@@ -335,9 +362,7 @@ export async function listRecentActivity(options: FeedOptions = {}): Promise<Fee
     };
   });
 
-  const mergedFeed = mergeFeedActivity(remoteFeed, listRecentActivityFromDemo(currentUserId));
-
-  return filterFeedByScope(mergedFeed, scope);
+  return filterFeed(mergeFeedActivity(remoteFeed, listRecentActivityFromDemo(currentUserId)));
 }
 
 function listRecentActivityFromDemo(viewerId: string): FeedActivity[] {
@@ -712,13 +737,9 @@ export async function submitRating(userId: string, input: SubmitRatingInput): Pr
   return { failedPhotos };
 }
 
-export async function getProfile(userId: string): Promise<ProfileWithStats> {
-  if (!canUseUserScopedRemote(userId)) {
-    return getDemoProfile(userId);
-  }
-
+async function fetchRemoteProfileWithStats(userId: string): Promise<ProfileWithStats | null> {
   const { data, error } = await supabase.from('profiles').select('*').eq('user_id', userId).single();
-  if (error) return getDemoProfile(userId);
+  if (error) return null;
 
   const [
     { count: spacesRated },
@@ -740,7 +761,47 @@ export async function getProfile(userId: string): Promise<ProfileWithStats> {
       helpful_votes: 0,
       rank_in_area: 0,
       followers: followers || 0,
-      following: Math.max(following || 0, localState.following.size),
+      following: following || 0,
+    },
+  };
+}
+
+export async function getProfile(userId: string): Promise<ProfileWithStats> {
+  if (!canUseUserScopedRemote(userId)) {
+    return getDemoProfile(userId);
+  }
+
+  const profile = await fetchRemoteProfileWithStats(userId);
+  if (!profile) return getDemoProfile(userId);
+
+  return {
+    ...profile,
+    stats: { ...profile.stats, following: Math.max(profile.stats.following, localState.following.size) },
+  };
+}
+
+export async function getPublicProfile(targetUserId: string, viewerId: string): Promise<ProfileWithStats | null> {
+  const followingIds = await fetchFollowingIds(viewerId);
+  const remoteProfile = isSupabaseConfigured && supabase && isUuid(targetUserId)
+    ? await fetchRemoteProfileWithStats(targetUserId)
+    : null;
+  if (remoteProfile) return { ...remoteProfile, is_following: followingIds.has(targetUserId) };
+
+  const localProfile = findLocalProfile(targetUserId);
+  if (!localProfile) return null;
+
+  const ratings = localState.feed.filter((activity) => activity.user_id === targetUserId);
+  const isFollowing = followingIds.has(targetUserId);
+  return {
+    ...localProfile,
+    is_following: isFollowing,
+    stats: {
+      spaces_rated: new Set(ratings.map((activity) => activity.space_id)).size,
+      reviews_written: ratings.filter((activity) => activity.review_text).length,
+      helpful_votes: ratings.reduce((total, activity) => total + (activity.likes_count || 0), 0),
+      rank_in_area: 0,
+      followers: isFollowing ? 1 : 0,
+      following: 0,
     },
   };
 }

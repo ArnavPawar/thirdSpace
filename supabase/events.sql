@@ -33,6 +33,11 @@ alter table public.space_events enable row level security;
 grant select on public.space_events to anon, authenticated;
 grant insert on public.space_events to authenticated;
 
+-- Used by scripts/backfill-events.ts.
+grant usage on schema public to service_role;
+grant select on public.ratings, public.spaces to service_role;
+grant select, insert on public.space_events to service_role;
+
 drop policy if exists "public events are readable" on public.space_events;
 create policy "public events are readable" on public.space_events
   for select using (

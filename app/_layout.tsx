@@ -36,6 +36,17 @@ export default function RootLayout() {
             headerStyle: { backgroundColor: colors.background },
           }}
         />
+        <Stack.Screen
+          name="user/[id]"
+          options={{
+            headerShown: true,
+            title: '',
+            headerBackTitle: 'Back',
+            headerShadowVisible: false,
+            headerTintColor: colors.ink,
+            headerStyle: { backgroundColor: colors.background },
+          }}
+        />
       </Stack>
     </AuthProvider>
   );

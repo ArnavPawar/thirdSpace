@@ -1,5 +1,10 @@
 import { Alert, Linking, Platform, Share } from 'react-native';
+import { router } from 'expo-router';
 import type { SpaceWithAttributes } from '@/types/space';
+
+export function openProfile(profileUserId: string, currentUserId: string) {
+  router.push((profileUserId === currentUserId ? '/profile' : `/user/${profileUserId}`) as never);
+}
 
 export function getDirectionsUrl(space: SpaceWithAttributes) {
   const label = encodeURIComponent(space.name);

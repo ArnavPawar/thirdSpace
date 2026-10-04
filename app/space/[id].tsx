@@ -7,7 +7,7 @@ import AttributeBars from '@/components/AttributeBars';
 import FeedCard from '@/components/FeedCard';
 import PhotoGrid from '@/components/PhotoGrid';
 import PhotoViewer from '@/components/PhotoViewer';
-import { CategoryIcon, EmptyState, ScorePill } from '@/components/ui';
+import { CategoryIcon, EmptyState, OpenStatusBadge, ScorePill } from '@/components/ui';
 import { useAuth } from '@/lib/auth';
 import { getSpaceDetails, listSpacePhotos, toggleFavorite } from '@/lib/data';
 import { openDirections, openExternalUrl, shareSpace } from '@/lib/links';
@@ -138,7 +138,10 @@ export default function SpaceDetailsScreen() {
             {space.hours && (
               <View className="flex-row items-start mt-2">
                 <Clock size={15} color={colors.subtle} />
-                <Text className="text-sm text-slate-600 ml-2 flex-1">{space.hours}</Text>
+                <View className="ml-2 flex-1">
+                  <OpenStatusBadge hours={space.hours} />
+                  <Text className="text-sm text-slate-600 mt-0.5">{space.hours}</Text>
+                </View>
               </View>
             )}
             {space.description && <Text className="text-[15px] text-slate-700 leading-[22px] mt-3">{space.description}</Text>}

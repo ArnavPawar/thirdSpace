@@ -6,7 +6,7 @@ import * as Location from 'expo-location';
 import { CalendarDays, ChevronDown, ChevronUp, Repeat } from 'lucide-react-native';
 import EventCard from '@/components/EventCard';
 import MonthGrid from '@/components/MonthGrid';
-import RangeBar, { RANGE_STOPS, type RangeMiles } from '@/components/RangeBar';
+import RangeBar, { RANGE_STOPS } from '@/components/RangeBar';
 import { EmptyState, ScreenHeader, SectionTitle } from '@/components/ui';
 import { listEventsNearby } from '@/lib/data';
 import { parseDateKey, toDateKey } from '@/lib/events';
@@ -14,7 +14,7 @@ import { colors } from '@/lib/theme';
 import type { CalendarOccurrence, SpaceCategory } from '@/types/space';
 
 const ARLINGTON = { latitude: 38.8816, longitude: -77.1081 };
-const DEFAULT_RADIUS: RangeMiles = 5;
+const DEFAULT_RADIUS = 5;
 const RANGE_DEBOUNCE_MS = 250;
 
 const firstOfMonth = (date: Date) => new Date(date.getFullYear(), date.getMonth(), 1);
@@ -24,8 +24,9 @@ const eventIdentity = (occurrence: CalendarOccurrence) =>
 export default function CalendarScreen() {
   const [monthStart, setMonthStart] = useState(() => firstOfMonth(new Date()));
   const [selectedDate, setSelectedDate] = useState<string | null>(null);
-  const [radius, setRadius] = useState<RangeMiles>(DEFAULT_RADIUS);
-  const [queryRadius, setQueryRadius] = useState<RangeMiles>(DEFAULT_RADIUS);
+  const [radius, setRadius] = useState(DEFAULT_RADIUS);
+  const [queryRadius, setQueryRadius] = useState(DEFAULT_RADIUS);
+  const [isDraggingRange, setIsDraggingRange] = useState(false);
   const [center, setCenter] = useState(ARLINGTON);
   const [hasUserLocation, setHasUserLocation] = useState(false);
   const [occurrences, setOccurrences] = useState<CalendarOccurrence[]>([]);
@@ -145,6 +146,7 @@ export default function CalendarScreen() {
   return (
     <SafeAreaView edges={['top']} className="flex-1 bg-slate-50">
       <ScrollView
+        scrollEnabled={!isDraggingRange}
         contentContainerStyle={{ paddingBottom: 40 }}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.primary} />}
       >
@@ -154,7 +156,12 @@ export default function CalendarScreen() {
         />
 
         <View className="px-4 gap-3">
-          <RangeBar value={radius} onChange={setRadius} eventCount={isLoading ? undefined : eventCount} />
+          <RangeBar
+            value={radius}
+            onChange={setRadius}
+            onDraggingChange={setIsDraggingRange}
+            eventCount={isLoading ? undefined : eventCount}
+          />
           <MonthGrid
             monthStart={monthStart}
             categoriesByDate={categoriesByDate}
