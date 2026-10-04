@@ -2,17 +2,19 @@ import React, { useCallback, useRef, useState } from 'react';
 import { ActivityIndicator, Alert, ScrollView, Text, TouchableOpacity, useWindowDimensions, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router, useFocusEffect, useLocalSearchParams } from 'expo-router';
-import { Clock, ExternalLink, Heart, KeyRound, Lock, MapPin, MessageCircle, Navigation, Phone, Plus, Share2 } from 'lucide-react-native';
+import { CalendarDays, Clock, ExternalLink, Heart, KeyRound, Lock, MapPin, MessageCircle, Navigation, Phone, Plus, Share2 } from 'lucide-react-native';
 import AttributeBars from '@/components/AttributeBars';
+import EventCard from '@/components/EventCard';
 import FeedCard from '@/components/FeedCard';
 import PhotoGrid from '@/components/PhotoGrid';
 import PhotoViewer from '@/components/PhotoViewer';
-import { CategoryIcon, EmptyState, OpenStatusBadge, ScorePill } from '@/components/ui';
+import { CategoryIcon, EmptyState, OpenStatusBadge, ScorePill, SectionTitle } from '@/components/ui';
 import { useAuth } from '@/lib/auth';
-import { getSpaceDetails, listSpacePhotos, toggleFavorite } from '@/lib/data';
+import { getSpaceDetails, listSpaceEvents, listSpacePhotos, toggleFavorite } from '@/lib/data';
+import { expandEventDates, toDateKey } from '@/lib/events';
 import { openDirections, openExternalUrl, shareSpace } from '@/lib/links';
 import { CATEGORY_META, colors } from '@/lib/theme';
-import type { ReviewPhoto, SpaceDetails } from '@/types/space';
+import type { ReviewPhoto, SpaceDetails, SpaceEvent } from '@/types/space';
 
 const GALLERY_COLUMNS = 4;
 const GALLERY_GAP = 8;
@@ -29,13 +31,19 @@ export default function SpaceDetailsScreen() {
   const [photos, setPhotos] = useState<ReviewPhoto[]>([]);
   const [viewerIndex, setViewerIndex] = useState<number | null>(null);
   const [isLoading, setIsLoading] = useState(true);
+  const [upcoming, setUpcoming] = useState<SpaceEvent[]>([]);
 
   const loadSpace = useCallback(async () => {
     try {
       if (!id) return;
-      const [details, spacePhotos] = await Promise.all([getSpaceDetails(id, userId), listSpacePhotos(id)]);
+      const [details, spacePhotos, spaceEvents] = await Promise.all([
+        getSpaceDetails(id, userId),
+        listSpacePhotos(id),
+        listSpaceEvents(id, userId),
+      ]);
       setSpace(details);
       setPhotos(details ? spacePhotos : []);
+      setUpcoming(spaceEvents);
     } catch {
       Alert.alert('Space Error', 'Could not load this space.');
     } finally {
@@ -200,6 +208,35 @@ export default function SpaceDetailsScreen() {
           <Plus size={18} color="white" />
           <Text className="text-white font-bold text-base ml-2">Rate this spot</Text>
         </TouchableOpacity>
+        <TouchableOpacity
+          onPress={() => router.push({ pathname: '/event/new', params: { spaceId: space.id } } as never)}
+          activeOpacity={0.85}
+          className="mt-3 bg-white border border-slate-200 rounded-2xl h-[52px] flex-row items-center justify-center"
+        >
+          <CalendarDays size={18} color={colors.primary} />
+          <Text className="text-ink font-bold text-base ml-2">Host an event here</Text>
+        </TouchableOpacity>
+
+        {upcoming.length > 0 && (
+          <View className="mt-6">
+            <SectionTitle title="Coming up" />
+            <View className="gap-3">
+              {upcoming.map((event) => {
+                const monthStart = new Date();
+                const dates = expandEventDates(event, new Date(monthStart.getFullYear(), monthStart.getMonth(), 1));
+                const today = toDateKey(new Date());
+                const date = event.event_date || dates.find((value) => value >= today) || dates[0] || today;
+                return (
+                  <EventCard
+                    key={event.id}
+                    occurrence={{ key: event.id, date, event, mention_count: 1 }}
+                    showRecurrence={event.kind === 'weekly'}
+                  />
+                );
+              })}
+            </View>
+          </View>
+        )}
 
         {space.attributes && (
           <View className="mt-3 bg-white rounded-3xl border border-slate-200 p-5">

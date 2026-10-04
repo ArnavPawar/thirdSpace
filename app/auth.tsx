@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { ActivityIndicator, Alert, KeyboardAvoidingView, Platform, ScrollView, Text, TextInput, TouchableOpacity, View } from 'react-native';
-import { router } from 'expo-router';
+import { router, useLocalSearchParams } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import * as AppleAuthentication from 'expo-apple-authentication';
 import { PrimaryButton } from '@/components/ui';
@@ -16,6 +16,7 @@ const PROVIDER_BUTTONS: { provider: OAuthProvider; label: string; mark: string; 
 ];
 
 export default function AuthScreen() {
+  const { next } = useLocalSearchParams<{ next?: string | string[] }>();
   const { signIn, signUp, signInWithApple, signInWithProvider } = useAuth();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -26,7 +27,14 @@ export default function AuthScreen() {
     isAppleSignInAvailable().then(setAppleAvailable).catch(() => setAppleAvailable(false));
   }, []);
 
-  const finish = () => router.replace('/(tabs)/profile');
+  const finish = () => {
+    const destination = Array.isArray(next) ? next[0] : next;
+    if (destination && destination.startsWith('/') && !destination.startsWith('//') && !destination.includes('://')) {
+      router.replace(destination as never);
+      return;
+    }
+    router.replace('/(tabs)/profile');
+  };
 
   const runSocial = async (action: 'apple' | OAuthProvider) => {
     if (!isSupabaseConfigured) {

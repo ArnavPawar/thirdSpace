@@ -44,7 +44,8 @@
           "photosPermission": "Third Space needs access to your photos so you can add pictures to reviews and comments.",
           "cameraPermission": "Third Space needs access to your camera so you can take pictures for reviews and comments."
         }
-      ]
+      ],
+      "@react-native-community/datetimepicker"
     ],
     "experiments": {
       "typedRoutes": true
