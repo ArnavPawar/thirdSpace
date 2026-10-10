@@ -29,7 +29,11 @@ export default function EventCard({ occurrence, showRecurrence = false }: EventC
     ? `Every ${WEEKDAY_NAMES[event.weekday ?? date.getDay()]}`
     : date.toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' });
 
-  const isLive = getEventPhase(event, occurrence.date) === 'live';
+  const phase = getEventPhase(event, occurrence.date);
+  const isLive = phase === 'live';
+  const isEnded = phase === 'ended';
+  const goingLabel = isEnded ? 'went' : 'going';
+  const mentions = Math.max(mentionCount, event.mention_count || 1);
 
   const openLink = () => {
     if (event.link_url) WebBrowser.openBrowserAsync(event.link_url).catch(() => undefined);
@@ -39,7 +43,8 @@ export default function EventCard({ occurrence, showRecurrence = false }: EventC
     <Pressable
       onPress={() => openEvent(event.id, undefined, occurrence.date)}
       accessibilityRole="button"
-      accessibilityLabel={`${event.title} at ${event.space.name}`}
+      accessibilityLabel={`${event.title} at ${event.space.name}${isEnded ? ', ended' : ''}`}
+      style={isEnded ? { opacity: 0.6 } : undefined}
       className="bg-white rounded-3xl border border-slate-200 p-3 flex-row"
     >
       <View
@@ -68,7 +73,12 @@ export default function EventCard({ occurrence, showRecurrence = false }: EventC
               </Text>
             </View>
           )}
-          {isWeekly && !isLive && (
+          {isEnded && (
+            <View className="rounded-full px-2 py-0.5 ml-2 bg-slate-100">
+              <Text className="text-[10px] font-bold text-slate-500">Ended</Text>
+            </View>
+          )}
+          {isWeekly && !isLive && !isEnded && (
             <View style={{ backgroundColor: colors.primarySoft }} className="flex-row items-center rounded-full px-2 py-0.5 ml-2">
               <Repeat size={10} color={colors.primary} />
               <Text className="text-[10px] font-bold text-primary ml-1">Weekly</Text>
@@ -116,13 +126,16 @@ export default function EventCard({ occurrence, showRecurrence = false }: EventC
                 <View className="ml-2">
                   <Users size={12} color={colors.muted} />
                 </View>
-                <Text className="text-[12px] font-semibold text-slate-500 ml-1">{event.capacity ? `${event.going_count}/${event.capacity}` : event.going_count} going</Text>
+                <Text className="text-[12px] font-semibold text-slate-500 ml-1">{event.capacity && !isEnded ? `${event.going_count}/${event.capacity}` : event.going_count} {goingLabel}</Text>
               </>
             ) : (
               <Text numberOfLines={1} className="text-[11px] font-semibold text-slate-400 flex-shrink">
-                {event.going_count > 0 ? `${event.going_count} going · ` : ''}
-                {event.source_type === 'space' ? 'Mentioned in the place description' : `Mentioned in reviews${event.profile?.username ? ` · @${event.profile.username}` : ` · ${getDisplayName(event.profile)}`}`}
-                {mentionCount > 1 ? ` · ${mentionCount}×` : ''}
+                {event.going_count > 0 ? `${event.going_count} ${goingLabel} · ` : ''}
+                {event.source_type === 'space'
+                  ? 'Mentioned in the place description'
+                  : mentions > 1
+                    ? `Mentioned in ${mentions} reviews`
+                    : `Mentioned in reviews · ${event.profile?.username ? `@${event.profile.username}` : getDisplayName(event.profile)}`}
               </Text>
             )}
           </View>

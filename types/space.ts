@@ -507,6 +507,10 @@ export interface SpaceEvent {
   source_type: EventSourceType;
   source_id: string;
   source_user_id?: string;
+  /** Shared by every mention of the same event at the same spot. Hosted events are their own series. */
+  series_id?: string;
+  /** How many reviews mention this event, when known. */
+  mention_count?: number;
   host_user_id?: string;
   visibility: EventVisibility;
   theme: EventTheme;

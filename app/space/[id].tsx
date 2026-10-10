@@ -224,7 +224,7 @@ export default function SpaceDetailsScreen() {
               {upcoming.map((event) => (
                 <EventCard
                   key={event.id}
-                  occurrence={{ key: event.id, date: event.occurrence_date || toDateKey(new Date()), event, mention_count: 1 }}
+                  occurrence={{ key: event.id, date: event.occurrence_date || toDateKey(new Date()), event, mention_count: event.mention_count || 1 }}
                   showRecurrence={event.kind === 'weekly'}
                 />
               ))}

@@ -1,4 +1,4 @@
--- Group chats for people going to an event. Each occurrence of an event has its own chat.
+-- Group chats for people going to an event. Each occurrence of an event series has its own chat.
 -- Run after hosted-events.sql. Safe to re-run.
 -- Chats disappear the day after the event: rows stop being readable then, and purge_expired_event_messages()
 -- deletes them for good (scheduled below when pg_cron is available).
@@ -21,6 +21,12 @@ create index if not exists event_messages_thread_idx
 
 alter table public.event_messages enable row level security;
 
+-- Messages belong to the event's series (see hosted-events.sql), same as RSVPs.
+update public.event_messages m
+set event_id = e.series_id
+from public.space_events e
+where e.id = m.event_id and e.series_id <> e.id;
+
 -- The host and anyone marked going for that date are in the chat, until the day after the event.
 create or replace function public.can_access_event_chat(target_id uuid, occurrence date)
 returns boolean
@@ -41,7 +47,8 @@ begin
     return false;
   end if;
 
-  if event_row.kind = 'one_time' and occurrence is distinct from event_row.event_date then
+  -- Chats live on the series anchor, so this is the same date check RSVPs use.
+  if public.resolve_event_occurrence(event_row, occurrence) is distinct from occurrence then
     return false;
   end if;
 

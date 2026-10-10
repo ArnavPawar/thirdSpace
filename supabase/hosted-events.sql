@@ -49,6 +49,111 @@ create unique index if not exists space_events_invite_token_idx
 create index if not exists space_events_host_idx on public.space_events (host_user_id) where host_user_id is not null;
 create index if not exists space_events_visibility_date_idx on public.space_events (visibility, event_date);
 
+-- Every review mentioning "Trivia Night" at the same spot belongs to one series, anchored on the oldest
+-- mention. RSVPs, check-ins, and chat messages are stored against the anchor so they never split.
+-- Hosted events are always their own series.
+alter table public.space_events add column if not exists series_id uuid;
+create index if not exists space_events_series_idx on public.space_events (series_id);
+
+create or replace function public.assign_event_series()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+  if new.source_type = 'hosted' then
+    new.series_id := new.id;
+    return new;
+  end if;
+
+  -- Two reviews saved at once shouldn't each start their own series.
+  perform pg_advisory_xact_lock(hashtext(new.space_id::text || '|' || lower(btrim(new.title))));
+
+  select e.series_id into new.series_id
+  from public.space_events e
+  where e.space_id = new.space_id
+    and lower(btrim(e.title)) = lower(btrim(new.title))
+    and e.source_type <> 'hosted'
+    and e.series_id is not null
+    and exists (select 1 from public.space_events anchor where anchor.id = e.series_id)
+  order by e.source_created_at, e.id
+  limit 1;
+
+  new.series_id := coalesce(new.series_id, new.id);
+  return new;
+end;
+$$;
+
+drop trigger if exists space_events_assign_series on public.space_events;
+create trigger space_events_assign_series
+  before insert on public.space_events
+  for each row execute function public.assign_event_series();
+
+-- If the anchor mention goes away (its review was deleted), hand the series and its RSVPs to the next oldest mention.
+create or replace function public.reassign_event_series()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  next_anchor uuid;
+begin
+  if old.series_id is distinct from old.id then
+    return old;
+  end if;
+
+  select id into next_anchor
+  from public.space_events
+  where series_id = old.id and id <> old.id
+  order by source_created_at, id
+  limit 1;
+
+  if next_anchor is null then
+    return old;
+  end if;
+
+  update public.space_events set series_id = next_anchor where series_id = old.id and id <> old.id;
+  update public.event_rsvps set event_id = next_anchor where event_id = old.id;
+  update public.event_checkins set event_id = next_anchor where event_id = old.id;
+  if to_regclass('public.event_messages') is not null then
+    execute 'update public.event_messages set event_id = $1 where event_id = $2' using next_anchor, old.id;
+  end if;
+  return old;
+end;
+$$;
+
+-- Backfill rows from before series existed. Rows that already have a series keep it.
+with keyed as (
+  select
+    id,
+    space_id,
+    source_type,
+    lower(btrim(title)) as title_key,
+    first_value(id) over (
+      partition by space_id, lower(btrim(title)), source_type = 'hosted'
+      order by source_created_at, id
+    ) as oldest
+  from public.space_events
+),
+existing as (
+  select distinct on (space_id, lower(btrim(title)))
+    space_id,
+    lower(btrim(title)) as title_key,
+    series_id
+  from public.space_events
+  where series_id is not null and source_type <> 'hosted'
+  order by space_id, lower(btrim(title)), source_created_at, id
+)
+update public.space_events e
+set series_id = case when k.source_type = 'hosted' then k.id else coalesce(x.series_id, k.oldest) end
+from keyed k
+left join existing x on x.space_id = k.space_id and x.title_key = k.title_key
+where e.id = k.id and e.series_id is null;
+
+alter table public.space_events alter column series_id set not null;
+
 -- RSVPs and check-ins are per occurrence so a weekly trivia night gets a fresh headcount each week.
 create table if not exists public.event_rsvps (
   event_id uuid not null references public.space_events(id) on delete cascade,
@@ -89,6 +194,28 @@ create table if not exists public.event_checkins (
 create index if not exists event_checkins_user_idx on public.event_checkins (user_id);
 
 alter table public.event_checkins enable row level security;
+
+drop trigger if exists space_events_reassign_series on public.space_events;
+create trigger space_events_reassign_series
+  before delete on public.space_events
+  for each row execute function public.reassign_event_series();
+
+-- Move any RSVPs and check-ins saved against a non-anchor mention onto its series.
+insert into public.event_rsvps (event_id, occurrence_date, user_id, status, created_at)
+select e.series_id, r.occurrence_date, r.user_id, r.status, r.created_at
+from public.event_rsvps r
+join public.space_events e on e.id = r.event_id
+where e.series_id <> e.id
+on conflict (event_id, occurrence_date, user_id) do nothing;
+delete from public.event_rsvps r using public.space_events e where e.id = r.event_id and e.series_id <> e.id;
+
+insert into public.event_checkins (event_id, occurrence_date, user_id, created_at)
+select e.series_id, c.occurrence_date, c.user_id, c.created_at
+from public.event_checkins c
+join public.space_events e on e.id = c.event_id
+where e.series_id <> e.id
+on conflict (event_id, occurrence_date, user_id) do nothing;
+delete from public.event_checkins c using public.space_events e where e.id = c.event_id and e.series_id <> e.id;
 
 -- Security definer so event and RSVP policies can see each other without recursing.
 create or replace function public.can_read_event(target_id uuid)
@@ -133,15 +260,27 @@ begin
 end;
 $$;
 
--- One-time events only have their own date. Weekly events take the requested date if it falls on the
--- right weekday, otherwise the next one from today.
+-- Mentioned events accept any date some mention in their series lands on, so "trivia every Tuesday" and
+-- "trivia on the 13th" share a headcount. Otherwise one-time events use their own date and weekly events
+-- use the requested date if it's on the right weekday, or the next one from today.
 create or replace function public.resolve_event_occurrence(event_row public.space_events, occurrence date)
 returns date
 language plpgsql
 stable
+security definer
 set search_path = public
 as $$
 begin
+  if occurrence is not null and event_row.source_type <> 'hosted' and exists (
+    select 1 from public.space_events m
+    where m.series_id = event_row.series_id
+      and (
+        (m.kind = 'one_time' and m.event_date = occurrence)
+        or (m.kind = 'weekly' and m.weekday = extract(dow from occurrence)::int)
+      )
+  ) then
+    return occurrence;
+  end if;
   if event_row.kind = 'one_time' then
     return event_row.event_date;
   end if;
@@ -199,6 +338,7 @@ declare
   spot public.spaces;
   allowed boolean;
   occ date;
+  series uuid;
 begin
   select * into event_row from public.space_events where id = target_id;
   if not found then
@@ -223,11 +363,13 @@ begin
   end if;
 
   occ := public.resolve_event_occurrence(event_row, occurrence);
+  series := coalesce(event_row.series_id, event_row.id);
 
   return jsonb_build_object(
     'event', to_jsonb(event_row),
     'space', to_jsonb(spot),
     'occurrence_date', occ,
+    'mention_count', (select count(*) from public.space_events m where m.series_id = series),
     'host', (
       select jsonb_build_object(
         'id', p.id,
@@ -244,15 +386,15 @@ begin
       from public.profiles p
       where p.user_id = event_row.host_user_id
     ),
-    'going', public.event_people(event_row.id, occ, 'going'),
-    'here', public.event_people(event_row.id, occ, 'here'),
+    'going', public.event_people(series, occ, 'going'),
+    'here', public.event_people(series, occ, 'here'),
     'viewer_status', (
       select r.status from public.event_rsvps r
-      where r.event_id = event_row.id and r.occurrence_date = occ and r.user_id = auth.uid()
+      where r.event_id = series and r.occurrence_date = occ and r.user_id = auth.uid()
     ),
     'viewer_here', exists (
       select 1 from public.event_checkins c
-      where c.event_id = event_row.id and c.occurrence_date = occ and c.user_id = auth.uid()
+      where c.event_id = series and c.occurrence_date = occ and c.user_id = auth.uid()
     )
   );
 end;
@@ -278,6 +420,7 @@ declare
   allowed boolean;
   headcount integer;
   occ date;
+  series uuid;
 begin
   if auth.uid() is null then
     raise exception 'Sign in to RSVP';
@@ -300,6 +443,7 @@ begin
   end if;
 
   occ := public.resolve_event_occurrence(event_row, occurrence);
+  series := coalesce(event_row.series_id, event_row.id);
   -- One day of slack because current_date is UTC and the event date is local to the spot.
   if rsvp_status is not null and occ < current_date - 1 then
     raise exception 'This event already happened';
@@ -310,23 +454,23 @@ begin
     perform 1 from public.space_events where id = target_id for update;
     select count(*) into headcount
     from public.event_rsvps
-    where event_id = target_id and occurrence_date = occ and status = 'going' and user_id <> auth.uid();
+    where event_id = series and occurrence_date = occ and status = 'going' and user_id <> auth.uid();
     if headcount >= event_row.capacity then
       raise exception 'This event is full';
     end if;
   end if;
 
   if rsvp_status is null then
-    delete from public.event_rsvps where event_id = target_id and occurrence_date = occ and user_id = auth.uid();
+    delete from public.event_rsvps where event_id = series and occurrence_date = occ and user_id = auth.uid();
   else
     insert into public.event_rsvps (event_id, occurrence_date, user_id, status)
-    values (target_id, occ, auth.uid(), rsvp_status)
+    values (series, occ, auth.uid(), rsvp_status)
     on conflict (event_id, occurrence_date, user_id) do update set status = excluded.status;
   end if;
 
   select count(*) into headcount
   from public.event_rsvps
-  where event_id = target_id and occurrence_date = occ and status = 'going';
+  where event_id = series and occurrence_date = occ and status = 'going';
   return headcount;
 end;
 $$;
@@ -348,6 +492,7 @@ declare
   allowed boolean;
   headcount integer;
   occ date;
+  series uuid;
 begin
   if auth.uid() is null then
     raise exception 'Sign in to check in';
@@ -366,21 +511,22 @@ begin
   end if;
 
   occ := public.resolve_event_occurrence(event_row, occurrence);
+  series := coalesce(event_row.series_id, event_row.id);
 
   if is_here then
     if abs(occ - current_date) > 1 then
       raise exception 'You can only check in while it is happening';
     end if;
     insert into public.event_checkins (event_id, occurrence_date, user_id)
-    values (target_id, occ, auth.uid())
+    values (series, occ, auth.uid())
     on conflict do nothing;
   else
-    delete from public.event_checkins where event_id = target_id and occurrence_date = occ and user_id = auth.uid();
+    delete from public.event_checkins where event_id = series and occurrence_date = occ and user_id = auth.uid();
   end if;
 
   select count(*) into headcount
   from public.event_checkins
-  where event_id = target_id and occurrence_date = occ;
+  where event_id = series and occurrence_date = occ;
   return headcount;
 end;
 $$;

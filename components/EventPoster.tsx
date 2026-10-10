@@ -33,6 +33,7 @@ export function EventPoster({
   visibility,
   theme,
   cancelled,
+  ended,
 }: {
   title: string;
   when: string;
@@ -40,12 +41,13 @@ export function EventPoster({
   visibility?: EventVisibility;
   theme?: string;
   cancelled?: boolean;
+  ended?: boolean;
 }) {
   const style = eventThemeStyle(theme);
   return (
     <View style={{ backgroundColor: style.background }} className="rounded-3xl overflow-hidden px-5 pt-5 pb-6 min-h-[210px]">
       <View
-        style={{ backgroundColor: style.glow, position: 'absolute', width: 180, height: 180, borderRadius: 90, top: -70, right: -40, opacity: 0.9 }}
+        style={{ backgroundColor: style.glow, position: 'absolute', width: 180, height: 180, borderRadius: 90, top: -70, right: -40, opacity: ended ? 0.35 : 0.9 }}
       />
       <View
         style={{ backgroundColor: style.ink, position: 'absolute', width: 120, height: 120, borderRadius: 60, bottom: -50, left: -20, opacity: 0.08 }}
@@ -60,6 +62,11 @@ export function EventPoster({
         )}
         {cancelled && (
           <Text className="text-[12px] font-bold text-rose-200 ml-2">Cancelled</Text>
+        )}
+        {ended && !cancelled && (
+          <View style={{ backgroundColor: 'rgba(0,0,0,0.35)' }} className="rounded-full px-2.5 py-1 ml-2">
+            <Text style={{ color: style.ink }} className="text-[11px] font-bold uppercase">Ended</Text>
+          </View>
         )}
       </View>
       <Text style={{ color: style.ink }} className="text-[32px] font-extrabold mt-8 leading-9" numberOfLines={3}>

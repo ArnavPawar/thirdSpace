@@ -56,7 +56,7 @@ export default function EventChatScreen() {
       const loaded = await getEvent(eventId, userId, token, date);
       setEvent(loaded);
       if (loaded?.occurrence_date && canUseEventChat(loaded, userId)) {
-        setMessages(await listEventMessages(loaded.id, loaded.occurrence_date));
+        setMessages(await listEventMessages(loaded, loaded.occurrence_date));
       }
     } catch (error) {
       Alert.alert('Group chat', error instanceof Error ? error.message : 'Could not load the chat.');
@@ -71,7 +71,7 @@ export default function EventChatScreen() {
 
   useEffect(() => {
     if (!event || !occurrence || !canChat) return undefined;
-    return subscribeToEventMessages(event.id, occurrence, (message) => {
+    return subscribeToEventMessages(event, occurrence, (message) => {
       setMessages((current) => mergeMessage(current, message));
     });
   }, [canChat, event, occurrence]);

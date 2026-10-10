@@ -6,8 +6,10 @@ import {
   formatEventTime,
   getEventPhase,
   isChatOpen,
+  nextOccurrenceAfter,
   nextOccurrenceDate,
   resolveOccurrenceDate,
+  seriesKey,
 } from './events';
 
 function assert(condition: unknown, message: string) {
@@ -108,5 +110,25 @@ assert(getEventPhase({}, '2026-10-06', new Date(2026, 9, 7, 0, 1)) === 'ended', 
 
 assert(isChatOpen('2026-10-06', new Date(2026, 9, 7, 22)), 'chat stays open the day after');
 assert(!isChatOpen('2026-10-06', new Date(2026, 9, 8, 0, 1)), 'chat closes two days later');
+
+assert(nextOccurrenceAfter(tuesdayTrivia, '2026-10-06', new Date(2026, 9, 6, 23)) === '2026-10-13', 'next week after tonight');
+assert(nextOccurrenceAfter(tuesdayTrivia, '2026-09-01', reference) === '2026-10-06', 'skips to upcoming for an old date');
+assert(nextOccurrenceAfter({ kind: 'one_time', event_date: '2026-10-06' }, '2026-10-06') === undefined, 'one-time has no next');
+
+// Different wordings in different reviews should land in the same series.
+const triviaWordings = [
+  'Trivia every Tuesday at 8pm and the hosts are hilarious.',
+  'Came for trivia night, they run it every Tuesday. Our team came in third.',
+  'Trivia on Tuesdays at 8pm is the move. Sign your team up at theboardroomva.com/trivia so you get a table.',
+].map((text) => extractEvents(text, reference)[0]);
+assert(triviaWordings.every((event) => event?.kind === 'weekly' && event.weekday === 2), 'all trivia wordings are weekly Tuesdays');
+const triviaKeys = new Set(triviaWordings.map((event) => seriesKey({ space_id: 'board-room', title: event.title })));
+assert(triviaKeys.size === 1, 'all trivia wordings share one series');
+assert(
+  seriesKey({ space_id: 'a', title: 'Trivia Night' }) !== seriesKey({ space_id: 'b', title: 'Trivia Night' }),
+  'same title at different spots is a different series'
+);
+const runClub = extractEvents('Joined the run club Thursday nights. Easy pace groups.', reference)[0];
+assert(runClub?.title === 'Run Club' && runClub.weekday === 4, '"Thursday nights" run club joins the Thursday series');
 
 console.log('events tests passed');

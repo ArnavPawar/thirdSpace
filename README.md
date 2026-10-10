@@ -43,6 +43,7 @@ npm install
 7. Run `supabase/event-chat.sql` for the group chats that open for people going to an event. Enable the `pg_cron` extension first if you want expired chats purged nightly
 8. In Authentication → URL Configuration, add `thirdspace://**` and `exp://**` to Redirect URLs
 9. Update your `.env` file with the project URL and anon key
+10. Optional: sign in to the app once, then run `supabase/seed-demo-events.sql` for demo hangouts, private invites with RSVP caps, duplicate trivia/run club reviews, and fake headcounts. The most recently created non-demo profile is used as "you". It's safe to re-run
 
 ### 4. Run the App
 

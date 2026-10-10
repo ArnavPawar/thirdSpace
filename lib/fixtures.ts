@@ -97,6 +97,32 @@ export const demoProfiles: Profile[] = [
   },
 ];
 
+// Extra people so event headcounts look like a real crowd in demo mode.
+const CROWD = [
+  ['leo', 'leo_designs', 'Leo Martin'],
+  ['priya', 'priya.k', 'Priya Kapoor'],
+  ['jordan', 'jordan_hoops', 'Jordan Reyes'],
+  ['sam', 'samwrites', 'Sam Okafor'],
+  ['ava', 'ava.outside', 'Ava Lindqvist'],
+  ['marcus', 'marcus_t', 'Marcus Tran'],
+  ['zoe', 'zoe_plays', 'Zoe Bennett'],
+  ['diego', 'diego.eats', 'Diego Alvarez'],
+  ['hana', 'hana_reads', 'Hana Sato'],
+  ['tyler', 'tyler.runs', 'Tyler Brooks'],
+  ['maya', 'maya_m', 'Maya Goldberg'],
+  ['omar', 'omar.sunsets', 'Omar Haddad'],
+] as const;
+
+export const demoCrowdProfiles: Profile[] = CROWD.map(([key, username, fullName]) => ({
+  id: `profile-${key}`,
+  user_id: `user-${key}`,
+  username,
+  full_name: fullName,
+  location: 'Arlington, VA',
+  created_at: now,
+  updated_at: now,
+}));
+
 export const demoSpaces: SpaceWithAttributes[] = [
   {
     id: '00000000-0000-0000-0000-000000000101',
@@ -511,6 +537,58 @@ export const demoFeed: FeedActivity[] = [
     space: demoSpaces[4],
     profile: demoProfiles[1],
     is_following: true,
+  },
+  // The next three mention the same trivia night and run club as reviews above, in different words.
+  // They should merge into one event each, with one shared headcount.
+  {
+    id: 'rating-12',
+    user_id: 'user-nina',
+    space_id: demoSpaces[3].id,
+    category: 'Interactive Fun (Arcades, Board Games)',
+    primary_purpose: 'Group Games',
+    attribute_scores: demoSpaces[3].attributes!.attribute_scores,
+    overall_score: demoSpaces[3].attributes!.overall_score,
+    review_text: 'Came for trivia night, they run it every Tuesday. Our team came in third and still had a blast.',
+    likes_count: 6,
+    comments_count: 0,
+    current_user_liked: false,
+    created_at: daysAgo(6),
+    space: demoSpaces[3],
+    profile: demoProfiles[3],
+    is_following: true,
+  },
+  {
+    id: 'rating-13',
+    user_id: 'user-emma',
+    space_id: demoSpaces[3].id,
+    category: 'Interactive Fun (Arcades, Board Games)',
+    primary_purpose: 'Group Games',
+    attribute_scores: demoSpaces[3].attributes!.attribute_scores,
+    overall_score: demoSpaces[3].attributes!.overall_score,
+    review_text: 'Trivia on Tuesdays at 8pm is the move. Sign your team up at theboardroomva.com/trivia so you get a table.',
+    likes_count: 3,
+    comments_count: 0,
+    current_user_liked: false,
+    created_at: daysAgo(1),
+    space: demoSpaces[3],
+    profile: demoProfiles[2],
+    is_following: false,
+  },
+  {
+    id: 'rating-14',
+    user_id: demoCurrentUserId,
+    space_id: demoSpaces[4].id,
+    category: 'Smoke & Sunset Spots',
+    primary_purpose: 'Sunset Watch',
+    attribute_scores: demoSpaces[4].attributes!.attribute_scores,
+    overall_score: demoSpaces[4].attributes!.overall_score,
+    review_text: 'Joined the run club Thursday nights. Easy pace groups and the sunset at the turnaround is unreal.',
+    likes_count: 4,
+    comments_count: 0,
+    current_user_liked: false,
+    created_at: daysAgo(2),
+    space: demoSpaces[4],
+    profile: demoProfiles[0],
   },
 ];
 

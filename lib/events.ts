@@ -384,6 +384,18 @@ export function isHostedEvent(event: { source_type: string }) {
   return event.source_type === 'hosted';
 }
 
+/**
+ * Every review mentioning "Trivia Night" at the same spot is one series. RSVPs, check-ins, and the
+ * group chat attach to the series so the headcount doesn't split across mentions.
+ */
+export function eventSeriesId(event: { id: string; series_id?: string }) {
+  return event.series_id || event.id;
+}
+
+export function seriesKey(event: { space_id: string; title: string }) {
+  return `${event.space_id}|${event.title.trim().toLowerCase()}`;
+}
+
 export type EventPhase = 'upcoming' | 'live' | 'ended';
 
 export const LIVE_LEAD_MINUTES = 30;
@@ -404,6 +416,14 @@ export function resolveOccurrenceDate(event: OccurrenceShape, requested?: string
   if (requested && /^\d{4}-\d{2}-\d{2}$/.test(requested) && parseDateKey(requested).getDay() === event.weekday) {
     return requested;
   }
+  return nextOccurrenceDate(event, from);
+}
+
+/** The next date after `occurrenceDate` (and not before today) that a weekly event happens. */
+export function nextOccurrenceAfter(event: OccurrenceShape, occurrenceDate: string, today = new Date()): string | undefined {
+  if (event.kind !== 'weekly') return undefined;
+  const dayAfter = addDays(parseDateKey(occurrenceDate), 1);
+  const from = dayAfter > startOfDay(today) ? dayAfter : today;
   return nextOccurrenceDate(event, from);
 }
 
