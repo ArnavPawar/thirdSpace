@@ -3,15 +3,16 @@ import { ActivityIndicator, Alert, ScrollView, Text, TouchableOpacity, View } fr
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router, useFocusEffect, useLocalSearchParams } from 'expo-router';
 import { CalendarDays, Check, ExternalLink, Lock, MapPin, Share2, Users } from 'lucide-react-native';
+import { EventPoster, ThemePicker } from '@/components/EventPoster';
 import GoingFaces from '@/components/GoingFaces';
 import { CategoryIcon, EmptyState, PrimaryButton } from '@/components/ui';
 import { useAuth } from '@/lib/auth';
-import { cancelHostedEvent, getEvent, setEventRsvp } from '@/lib/data';
+import { cancelHostedEvent, getEvent, setEventRsvp, updateHostedEventTheme } from '@/lib/data';
 import { formatEventWhen, isHostedEvent } from '@/lib/events';
 import { getDisplayName } from '@/lib/format';
 import { eventHref, openExternalUrl, openProfile, requireSignedIn, shareEvent } from '@/lib/links';
 import { CATEGORY_META, colors } from '@/lib/theme';
-import type { RsvpStatus, SpaceEvent } from '@/types/space';
+import type { EventTheme, RsvpStatus, SpaceEvent } from '@/types/space';
 
 const firstParam = (value?: string | string[]) => (Array.isArray(value) ? value[0] : value);
 
@@ -120,20 +121,26 @@ export default function EventDetailScreen() {
     <SafeAreaView edges={['bottom']} className="flex-1 bg-slate-50">
       <ScrollView contentContainerStyle={{ padding: 16, paddingBottom: 32 }}>
         <View className="bg-white rounded-3xl border border-slate-200 overflow-hidden">
-          <View style={{ backgroundColor: meta.tint }} className="px-5 pt-5 pb-4">
-            <View className="flex-row items-center">
-              <View style={{ backgroundColor: meta.color }} className="rounded-full px-2.5 py-1">
-                <Text className="text-white text-[11px] font-bold uppercase">
-                  {hosted ? (event.visibility === 'private' ? 'Private' : 'Hosted') : 'Mentioned'}
-                </Text>
-              </View>
-              {event.cancelled_at && (
-                <Text className="text-[12px] font-bold text-rose-600 ml-2">Cancelled</Text>
-              )}
+          {hosted ? (
+            <View className="p-2 pb-0">
+              <EventPoster
+                title={event.title}
+                when={formatEventWhen(event)}
+                place={event.space.name}
+                visibility={event.visibility}
+                theme={event.theme}
+                cancelled={Boolean(event.cancelled_at)}
+              />
             </View>
-            <Text className="text-[28px] font-extrabold text-ink mt-3">{event.title}</Text>
-            <Text className="text-slate-600 mt-1">{formatEventWhen(event)}</Text>
-          </View>
+          ) : (
+            <View style={{ backgroundColor: meta.tint }} className="px-5 pt-5 pb-4">
+              <View style={{ backgroundColor: meta.color }} className="self-start rounded-full px-2.5 py-1">
+                <Text className="text-white text-[11px] font-bold uppercase">Mentioned</Text>
+              </View>
+              <Text className="text-[28px] font-extrabold text-ink mt-3">{event.title}</Text>
+              <Text className="text-slate-600 mt-1">{formatEventWhen(event)}</Text>
+            </View>
+          )}
 
           <View className="px-5 py-4 gap-3">
             <TouchableOpacity onPress={() => router.push(`/space/${event.space.id}` as never)} className="flex-row items-center" activeOpacity={0.7}>
@@ -160,6 +167,25 @@ export default function EventDetailScreen() {
             )}
           </View>
         </View>
+
+        {isHost && !event.cancelled_at && (
+          <View className="bg-white rounded-3xl border border-slate-200 p-5 mt-3">
+            <Text className="text-[15px] font-bold text-ink mb-3">Look</Text>
+            <ThemePicker
+              value={event.theme}
+              onChange={async (next: EventTheme) => {
+                const previous = event.theme;
+                setEvent({ ...event, theme: next });
+                try {
+                  await updateHostedEventTheme(userId, event.id, next);
+                } catch (error) {
+                  setEvent({ ...event, theme: previous });
+                  Alert.alert('Look', error instanceof Error ? error.message : 'Could not save the theme.');
+                }
+              }}
+            />
+          </View>
+        )}
 
         {hosted && !event.cancelled_at && (
           <View className="bg-white rounded-3xl border border-slate-200 p-5 mt-3">

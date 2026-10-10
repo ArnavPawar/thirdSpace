@@ -10,6 +10,7 @@ import {
   type CreateHostedEventInput,
   type EventKind,
   type EventSourceType,
+  type EventTheme,
   type EventVisibility,
   type FeedActivity,
   type LocalPhoto,
@@ -1392,6 +1393,7 @@ type StoredEventRow = Omit<EventRow, 'dedupe_key'> & {
   id?: string;
   created_at?: string;
   visibility?: EventVisibility | null;
+  theme?: EventTheme | null;
   host_user_id?: string | null;
   invite_token?: string | null;
   description?: string | null;
@@ -1412,6 +1414,7 @@ const rowToSpaceEvent = (
   source_user_id: row.source_user_id || undefined,
   host_user_id: row.host_user_id || undefined,
   visibility: row.visibility === 'private' ? 'private' : 'public',
+  theme: isEventTheme(row.theme) ? row.theme : 'indigo',
   title: row.title,
   kind: row.kind,
   event_date: row.event_date || undefined,
@@ -1590,6 +1593,10 @@ const daysFromToday = (days: number) => {
 
 const clipText = (value: string, max: number) => (value.length > max ? `${value.slice(0, max - 1).trimEnd()}…` : value);
 
+const EVENT_THEME_IDS: EventTheme[] = ['indigo', 'sunset', 'night', 'court', 'cafe', 'grove'];
+const isEventTheme = (value: unknown): value is EventTheme =>
+  typeof value === 'string' && EVENT_THEME_IDS.includes(value as EventTheme);
+
 const namesMatch = (left: string, right: string) => {
   const a = left.trim().toLowerCase();
   const b = right.trim().toLowerCase();
@@ -1648,6 +1655,7 @@ function seedDemoHosted() {
       source_user_id: mike.user_id,
       host_user_id: mike.user_id,
       visibility: 'public',
+      theme: 'cafe',
       title: 'After-work coffee hang',
       kind: 'one_time',
       event_date: daysFromToday(2),
@@ -1679,6 +1687,7 @@ function seedDemoHosted() {
       source_user_id: sarah.user_id,
       host_user_id: sarah.user_id,
       visibility: 'private',
+      theme: 'court',
       title: 'Pickup basketball',
       kind: 'one_time',
       event_date: daysFromToday(3),
@@ -1712,6 +1721,7 @@ function seedDemoHosted() {
       source_user_id: sarah.user_id,
       host_user_id: sarah.user_id,
       visibility: 'private',
+      theme: 'night',
       title: 'Friends-only game night',
       kind: 'one_time',
       event_date: daysFromToday(6),
@@ -1747,6 +1757,7 @@ function mapStoredEventRow(row: Record<string, unknown>): StoredEventRow {
     source_user_id: (row.source_user_id as string | null) || undefined,
     host_user_id: (row.host_user_id as string | null) || undefined,
     visibility: row.visibility === 'private' ? 'private' : 'public',
+    theme: isEventTheme(row.theme) ? row.theme : 'indigo',
     title: String(row.title),
     kind: row.kind as EventKind,
     event_date: (row.event_date as string | null) ?? null,
@@ -1945,6 +1956,7 @@ export async function createHostedEvent(userId: string, input: CreateHostedEvent
     source_user_id: userId,
     host_user_id: userId,
     visibility: input.visibility,
+    theme: isEventTheme(input.theme) ? input.theme : 'indigo',
     title,
     kind: 'one_time',
     event_date: input.eventDate,
@@ -1979,6 +1991,7 @@ export async function createHostedEvent(userId: string, input: CreateHostedEvent
     source_user_id: userId,
     host_user_id: userId,
     visibility: input.visibility,
+    theme: isEventTheme(input.theme) ? input.theme : 'indigo',
     title,
     kind: 'one_time',
     event_date: input.eventDate,
@@ -1996,6 +2009,27 @@ export async function createHostedEvent(userId: string, input: CreateHostedEvent
   if (error) throw new Error(error.message);
   eventCache.clear();
   return (await getEvent(id, userId, token)) || event;
+}
+
+export async function updateHostedEventTheme(userId: string, eventId: string, theme: EventTheme): Promise<void> {
+  if (!isEventTheme(theme)) throw new Error('Pick a look from the list.');
+  if (!canUseUserScopedRemote(userId)) {
+    seedDemoHosted();
+    const event = localState.hostedEvents?.find((item) => item.id === eventId);
+    if (!event || event.host_user_id !== userId) throw new Error('Only the host can change the look');
+    event.theme = theme;
+    eventCache.clear();
+    return;
+  }
+
+  const { error } = await supabase
+    .from('space_events')
+    .update({ theme })
+    .eq('id', eventId)
+    .eq('host_user_id', userId)
+    .eq('source_type', 'hosted');
+  if (error) throw new Error(error.message);
+  eventCache.clear();
 }
 
 export async function getEvent(eventId: string, viewerId?: string, token?: string): Promise<SpaceEvent | null> {

@@ -4,6 +4,7 @@ import DateTimePicker from '@react-native-community/datetimepicker';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router, useLocalSearchParams } from 'expo-router';
 import { Globe, Lock } from 'lucide-react-native';
+import { EventPoster, ThemePicker } from '@/components/EventPoster';
 import PlacePicker, { type PickedPlace } from '@/components/PlacePicker';
 import { Chip, PrimaryButton, SegmentedControl } from '@/components/ui';
 import { useAuth } from '@/lib/auth';
@@ -11,7 +12,7 @@ import { createHostedEvent } from '@/lib/data';
 import { formatEventTime, parseDateKey, parseEventTime, toDateKey } from '@/lib/events';
 import { eventHref, requireSignedIn, shareEvent } from '@/lib/links';
 import { CATEGORY_META, colors } from '@/lib/theme';
-import { CATEGORY_CONFIG, SPACE_CATEGORIES, type EventVisibility, type SpaceCategory, type ThirdSpace } from '@/types/space';
+import { CATEGORY_CONFIG, SPACE_CATEGORIES, type EventTheme, type EventVisibility, type SpaceCategory, type ThirdSpace } from '@/types/space';
 
 const defaultStart = () => {
   const date = new Date();
@@ -158,6 +159,7 @@ export default function NewEventScreen() {
   const [title, setTitle] = useState('');
   const [when, setWhen] = useState(defaultStart);
   const [visibility, setVisibility] = useState<EventVisibility>('public');
+  const [theme, setTheme] = useState<EventTheme>('indigo');
   const [capacityText, setCapacityText] = useState('');
   const [allowOverCapacity, setAllowOverCapacity] = useState(false);
   const [linkText, setLinkText] = useState('');
@@ -220,6 +222,7 @@ export default function NewEventScreen() {
         eventDate: toDateKey(when),
         startTime: time,
         visibility: effectiveVisibility,
+        theme,
         description: notes.trim() || undefined,
         capacity,
         allowOverCapacity,
@@ -246,7 +249,16 @@ export default function NewEventScreen() {
     <SafeAreaView edges={['bottom']} className="flex-1 bg-slate-50">
       <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} className="flex-1">
         <ScrollView contentContainerStyle={{ padding: 20, paddingBottom: 40 }} keyboardShouldPersistTaps="handled">
-          <Text className="text-[15px] text-slate-500 mb-4">A hangout at a real place. People RSVP here, even if you also have a Partiful link.</Text>
+          <EventPoster
+            title={title}
+            when={when.toLocaleString(undefined, { weekday: 'short', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}
+            place={place ? (place.existing ? place.space.name : placeName.trim() || place.space.name) : undefined}
+            visibility={effectiveVisibility}
+            theme={theme}
+          />
+          <View className="mt-3 mb-5">
+            <ThemePicker value={theme} onChange={setTheme} />
+          </View>
 
           <Text className="text-[13px] font-bold text-slate-400 uppercase tracking-wider mb-2">Where</Text>
           <PlacePicker

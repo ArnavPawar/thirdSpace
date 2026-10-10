@@ -9,6 +9,11 @@ alter table public.space_events add column if not exists invite_token text;
 alter table public.space_events add column if not exists description text;
 alter table public.space_events add column if not exists capacity integer;
 alter table public.space_events add column if not exists allow_over_capacity boolean not null default false;
+alter table public.space_events add column if not exists theme text not null default 'indigo';
+
+alter table public.space_events drop constraint if exists space_events_theme_check;
+alter table public.space_events add constraint space_events_theme_check
+  check (theme in ('indigo', 'sunset', 'night', 'court', 'cafe', 'grove'));
 alter table public.space_events add column if not exists cancelled_at timestamptz;
 
 alter table public.space_events drop constraint if exists space_events_source_type_check;

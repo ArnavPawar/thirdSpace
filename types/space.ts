@@ -499,6 +499,7 @@ export interface RatingHistoryEntry {
 export type EventKind = 'one_time' | 'weekly';
 export type EventSourceType = 'rating' | 'space' | 'hosted';
 export type EventVisibility = 'public' | 'private';
+export type EventTheme = 'indigo' | 'sunset' | 'night' | 'court' | 'cafe' | 'grove';
 
 export interface SpaceEvent {
   id: string;
@@ -508,6 +509,7 @@ export interface SpaceEvent {
   source_user_id?: string;
   host_user_id?: string;
   visibility: EventVisibility;
+  theme: EventTheme;
   title: string;
   kind: EventKind;
   event_date?: string; // YYYY-MM-DD, one_time only
@@ -537,6 +539,7 @@ export interface CreateHostedEventInput {
   eventDate: string;
   startTime: string;
   visibility: EventVisibility;
+  theme?: EventTheme;
   description?: string;
   capacity?: number;
   allowOverCapacity?: boolean;
