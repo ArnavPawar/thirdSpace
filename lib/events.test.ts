@@ -1,4 +1,14 @@
-import { expandEventDates, extractEvents, findLink, findStartTime, formatEventTime } from './events';
+import {
+  expandEventDates,
+  extractEvents,
+  findLink,
+  findStartTime,
+  formatEventTime,
+  getEventPhase,
+  isChatOpen,
+  nextOccurrenceDate,
+  resolveOccurrenceDate,
+} from './events';
 
 function assert(condition: unknown, message: string) {
   if (!condition) {
@@ -77,5 +87,26 @@ assert(oneTime.length === 1 && expandEventDates(
   { kind: 'one_time', event_date: '2026-11-02', source_created_at: reference.toISOString() },
   new Date(2026, 9, 1)
 ).length === 0, 'one-time events only appear in their month');
+
+const tuesdayTrivia = { kind: 'weekly' as const, weekday: 2 };
+assert(nextOccurrenceDate(tuesdayTrivia, reference) === '2026-10-06', 'next Tuesday after a Thursday');
+assert(nextOccurrenceDate(tuesdayTrivia, new Date(2026, 9, 6, 23)) === '2026-10-06', 'today counts as the next occurrence');
+assert(resolveOccurrenceDate(tuesdayTrivia, '2026-10-13', reference) === '2026-10-13', 'keeps a requested Tuesday');
+assert(resolveOccurrenceDate(tuesdayTrivia, '2026-10-14', reference) === '2026-10-06', 'ignores a requested date on the wrong weekday');
+assert(
+  resolveOccurrenceDate({ kind: 'one_time', event_date: '2026-10-17' }, '2026-10-20', reference) === '2026-10-17',
+  'one-time events always use their own date'
+);
+
+const eightPm = { start_time: '20:00' };
+assert(getEventPhase(eightPm, '2026-10-06', new Date(2026, 9, 6, 19, 0)) === 'upcoming', 'an hour early is upcoming');
+assert(getEventPhase(eightPm, '2026-10-06', new Date(2026, 9, 6, 19, 45)) === 'live', 'live 30 minutes before start');
+assert(getEventPhase(eightPm, '2026-10-06', new Date(2026, 9, 6, 23, 30)) === 'live', 'still live a few hours in');
+assert(getEventPhase(eightPm, '2026-10-06', new Date(2026, 9, 7, 0, 30)) === 'ended', 'ends four hours after start');
+assert(getEventPhase({}, '2026-10-06', new Date(2026, 9, 6, 9)) === 'live', 'no start time means live all day');
+assert(getEventPhase({}, '2026-10-06', new Date(2026, 9, 7, 0, 1)) === 'ended', 'no start time ends at midnight');
+
+assert(isChatOpen('2026-10-06', new Date(2026, 9, 7, 22)), 'chat stays open the day after');
+assert(!isChatOpen('2026-10-06', new Date(2026, 9, 8, 0, 1)), 'chat closes two days later');
 
 console.log('events tests passed');

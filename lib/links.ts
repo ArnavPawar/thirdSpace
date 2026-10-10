@@ -50,15 +50,28 @@ export async function shareSpace(space: SpaceWithAttributes) {
   });
 }
 
-export function eventHref(eventId: string, token?: string) {
-  return token ? `/event/${eventId}?token=${encodeURIComponent(token)}` : `/event/${eventId}`;
+const eventQuery = (token?: string, date?: string) => {
+  const query = [token && `token=${encodeURIComponent(token)}`, date && `date=${date}`].filter(Boolean).join('&');
+  return query ? `?${query}` : '';
+};
+
+const eventParams = (eventId: string, token?: string, date?: string) => ({
+  id: eventId,
+  ...(token ? { token } : {}),
+  ...(date ? { date } : {}),
+});
+
+export function eventHref(eventId: string, token?: string, date?: string) {
+  return `/event/${eventId}${eventQuery(token, date)}`;
 }
 
-export function openEvent(eventId: string, token?: string) {
-  router.push({
-    pathname: '/event/[id]',
-    params: token ? { id: eventId, token } : { id: eventId },
-  } as never);
+/** `date` picks which week of a weekly event to open; one-time events ignore it. */
+export function openEvent(eventId: string, token?: string, date?: string) {
+  router.push({ pathname: '/event/[id]', params: eventParams(eventId, token, date) } as never);
+}
+
+export function openEventChat(eventId: string, token?: string, date?: string) {
+  router.push({ pathname: '/event/chat/[id]', params: eventParams(eventId, token, date) } as never);
 }
 
 export function eventShareUrl(event: Pick<SpaceEvent, 'id' | 'visibility' | 'invite_token'>) {

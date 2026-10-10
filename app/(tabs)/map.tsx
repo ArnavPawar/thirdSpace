@@ -366,7 +366,7 @@ export default function MapScreen() {
       const distance = formatDistance(space.distance);
       const spaceEvents = eventsBySpace[space.id] || [];
       const openEvents = () => {
-        if (spaceEvents.length === 1) openEvent(spaceEvents[0].id);
+        if (spaceEvents.length === 1) openEvent(spaceEvents[0].id, undefined, spaceEvents[0].occurrence_date);
         else if (spaceEvents.length > 1) setEventChoices(spaceEvents);
       };
       return (
@@ -659,13 +659,14 @@ export default function MapScreen() {
               key={event.id}
               onPress={() => {
                 setEventChoices(null);
-                openEvent(event.id);
+                openEvent(event.id, undefined, event.occurrence_date);
               }}
               className="py-3 border-t border-slate-100"
             >
               <Text className="font-bold text-ink" numberOfLines={1}>{event.title}</Text>
               <Text className="text-[13px] text-slate-500 mt-0.5">
-                {event.event_date}{event.start_time ? ` · ${event.start_time}` : ''} · {event.going_count} going
+                {event.occurrence_date || event.event_date}{event.start_time ? ` · ${event.start_time}` : ''} · {event.going_count} going
+                {event.here_count > 0 ? ` · ${event.here_count} here` : ''}
               </Text>
             </TouchableOpacity>
           ))}

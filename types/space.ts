@@ -526,13 +526,30 @@ export interface SpaceEvent {
   created_at: string;
   space: SpaceWithAttributes;
   profile?: Profile;
+  /** The date the going/here headcounts below belong to. Weekly events have one per week. */
+  occurrence_date?: string;
   going_count: number;
   going: Profile[];
   viewer_going: boolean;
   viewer_rsvp?: RsvpStatus;
+  here_count: number;
+  here: Profile[];
+  viewer_here: boolean;
 }
 
 export type RsvpStatus = 'going' | 'not_going';
+
+export interface EventMessage {
+  id: string;
+  event_id: string;
+  occurrence_date: string;
+  user_id: string;
+  body: string;
+  created_at: string;
+  profile?: Profile;
+}
+
+export const MAX_EVENT_MESSAGE_LENGTH = 1000;
 
 export interface CreateHostedEventInput {
   title: string;

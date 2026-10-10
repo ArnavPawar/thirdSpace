@@ -384,6 +384,55 @@ export function isHostedEvent(event: { source_type: string }) {
   return event.source_type === 'hosted';
 }
 
+export type EventPhase = 'upcoming' | 'live' | 'ended';
+
+export const LIVE_LEAD_MINUTES = 30;
+export const LIVE_DURATION_HOURS = 4;
+
+type OccurrenceShape = { kind: EventKind; event_date?: string; weekday?: number };
+
+export function nextOccurrenceDate(event: OccurrenceShape, from = new Date()): string | undefined {
+  if (event.kind === 'one_time') return event.event_date;
+  if (event.weekday === undefined) return undefined;
+  const today = startOfDay(from);
+  return toDateKey(addDays(today, (event.weekday - today.getDay() + 7) % 7));
+}
+
+/** Weekly events need a specific date for headcounts; a requested date only counts if it lands on the right weekday. */
+export function resolveOccurrenceDate(event: OccurrenceShape, requested?: string, from = new Date()): string | undefined {
+  if (event.kind === 'one_time') return event.event_date;
+  if (requested && /^\d{4}-\d{2}-\d{2}$/.test(requested) && parseDateKey(requested).getDay() === event.weekday) {
+    return requested;
+  }
+  return nextOccurrenceDate(event, from);
+}
+
+export function getLiveWindow(event: { start_time?: string }, occurrenceDate: string) {
+  const day = parseDateKey(occurrenceDate);
+  if (!event.start_time) return { start: day, end: addDays(day, 1) };
+  const [hour, minute] = event.start_time.split(':').map(Number);
+  const startsAt = new Date(day.getFullYear(), day.getMonth(), day.getDate(), hour, minute).getTime();
+  return {
+    start: new Date(startsAt - LIVE_LEAD_MINUTES * 60 * 1000),
+    end: new Date(startsAt + LIVE_DURATION_HOURS * 60 * 60 * 1000),
+  };
+}
+
+export function getEventPhase(event: { start_time?: string }, occurrenceDate: string, now = new Date()): EventPhase {
+  const { start, end } = getLiveWindow(event, occurrenceDate);
+  if (now < start) return 'upcoming';
+  return now < end ? 'live' : 'ended';
+}
+
+// The database stops returning chat rows after the day following the event (see event-chat.sql).
+export function getChatClosesAt(occurrenceDate: string): Date {
+  return addDays(parseDateKey(occurrenceDate), 2);
+}
+
+export function isChatOpen(occurrenceDate: string, now = new Date()) {
+  return now < getChatClosesAt(occurrenceDate);
+}
+
 export function upcomingEventsBySpace(occurrences: CalendarOccurrence[], today = toDateKey(new Date())) {
   const bySpace = new Map<string, SpaceEvent[]>();
   occurrences.filter((occurrence) => occurrence.date >= today).forEach((occurrence) => {

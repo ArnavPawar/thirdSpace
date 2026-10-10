@@ -4,7 +4,7 @@ import * as WebBrowser from 'expo-web-browser';
 import { Clock, ExternalLink, MapPin, Repeat, Users } from 'lucide-react-native';
 import GoingFaces from '@/components/GoingFaces';
 import { useAuth } from '@/lib/auth';
-import { formatEventTime, isHostedEvent, parseDateKey, WEEKDAY_NAMES } from '@/lib/events';
+import { formatEventTime, getEventPhase, isHostedEvent, parseDateKey, WEEKDAY_NAMES } from '@/lib/events';
 import { formatDistance, getDisplayName } from '@/lib/format';
 import { openEvent } from '@/lib/links';
 import { CATEGORY_META, colors } from '@/lib/theme';
@@ -29,13 +29,15 @@ export default function EventCard({ occurrence, showRecurrence = false }: EventC
     ? `Every ${WEEKDAY_NAMES[event.weekday ?? date.getDay()]}`
     : date.toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' });
 
+  const isLive = getEventPhase(event, occurrence.date) === 'live';
+
   const openLink = () => {
     if (event.link_url) WebBrowser.openBrowserAsync(event.link_url).catch(() => undefined);
   };
 
   return (
     <Pressable
-      onPress={() => openEvent(event.id)}
+      onPress={() => openEvent(event.id, undefined, occurrence.date)}
       accessibilityRole="button"
       accessibilityLabel={`${event.title} at ${event.space.name}`}
       className="bg-white rounded-3xl border border-slate-200 p-3 flex-row"
@@ -58,7 +60,15 @@ export default function EventCard({ occurrence, showRecurrence = false }: EventC
       <View className="flex-1">
         <View className="flex-row items-center">
           <Text numberOfLines={1} className="text-[16px] font-extrabold text-ink flex-shrink">{event.title}</Text>
-          {isWeekly && (
+          {isLive && (
+            <View className="flex-row items-center bg-emerald-50 rounded-full px-2 py-0.5 ml-2">
+              <View style={{ backgroundColor: colors.success }} className="w-1.5 h-1.5 rounded-full" />
+              <Text className="text-[10px] font-bold text-emerald-700 ml-1">
+                {event.here_count > 0 ? `Live · ${event.here_count} here` : 'Live'}
+              </Text>
+            </View>
+          )}
+          {isWeekly && !isLive && (
             <View style={{ backgroundColor: colors.primarySoft }} className="flex-row items-center rounded-full px-2 py-0.5 ml-2">
               <Repeat size={10} color={colors.primary} />
               <Text className="text-[10px] font-bold text-primary ml-1">Weekly</Text>
@@ -88,7 +98,7 @@ export default function EventCard({ occurrence, showRecurrence = false }: EventC
           <Text numberOfLines={2} className="text-[13px] text-slate-600 italic mt-2 leading-[18px]">“{event.snippet}”</Text>
         ) : null}
 
-        {hosted && event.going.length > 0 && (
+        {event.going.length > 0 && (
           <View className="mt-2">
             <GoingFaces people={event.going} currentUserId={userId} size={24} />
           </View>
@@ -110,6 +120,7 @@ export default function EventCard({ occurrence, showRecurrence = false }: EventC
               </>
             ) : (
               <Text numberOfLines={1} className="text-[11px] font-semibold text-slate-400 flex-shrink">
+                {event.going_count > 0 ? `${event.going_count} going · ` : ''}
                 {event.source_type === 'space' ? 'Mentioned in the place description' : `Mentioned in reviews${event.profile?.username ? ` · @${event.profile.username}` : ` · ${getDisplayName(event.profile)}`}`}
                 {mentionCount > 1 ? ` · ${mentionCount}×` : ''}
               </Text>

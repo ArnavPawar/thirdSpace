@@ -11,7 +11,7 @@ import PhotoViewer from '@/components/PhotoViewer';
 import { CategoryIcon, EmptyState, OpenStatusBadge, ScorePill, SectionTitle } from '@/components/ui';
 import { useAuth } from '@/lib/auth';
 import { getSpaceDetails, listSpaceEvents, listSpacePhotos, toggleFavorite } from '@/lib/data';
-import { expandEventDates, toDateKey } from '@/lib/events';
+import { toDateKey } from '@/lib/events';
 import { openDirections, openExternalUrl, shareSpace } from '@/lib/links';
 import { CATEGORY_META, colors } from '@/lib/theme';
 import type { ReviewPhoto, SpaceDetails, SpaceEvent } from '@/types/space';
@@ -221,19 +221,13 @@ export default function SpaceDetailsScreen() {
           <View className="mt-6">
             <SectionTitle title="Coming up" />
             <View className="gap-3">
-              {upcoming.map((event) => {
-                const monthStart = new Date();
-                const dates = expandEventDates(event, new Date(monthStart.getFullYear(), monthStart.getMonth(), 1));
-                const today = toDateKey(new Date());
-                const date = event.event_date || dates.find((value) => value >= today) || dates[0] || today;
-                return (
-                  <EventCard
-                    key={event.id}
-                    occurrence={{ key: event.id, date, event, mention_count: 1 }}
-                    showRecurrence={event.kind === 'weekly'}
-                  />
-                );
-              })}
+              {upcoming.map((event) => (
+                <EventCard
+                  key={event.id}
+                  occurrence={{ key: event.id, date: event.occurrence_date || toDateKey(new Date()), event, mention_count: 1 }}
+                  showRecurrence={event.kind === 'weekly'}
+                />
+              ))}
             </View>
           </View>
         )}

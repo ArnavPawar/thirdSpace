@@ -11,8 +11,10 @@ import {
   type EventKind,
   type EventSourceType,
   type EventTheme,
+  type EventMessage,
   type EventVisibility,
   type FeedActivity,
+  MAX_EVENT_MESSAGE_LENGTH,
   type LocalPhoto,
   type Profile,
   type ProfileWithStats,
@@ -48,7 +50,11 @@ import {
   buildEventRows,
   expandEventDates,
   extractEvents,
+  getEventPhase,
   getMonthRange,
+  isChatOpen,
+  nextOccurrenceDate,
+  resolveOccurrenceDate,
   toDateKey,
   WEEKLY_LIFETIME_DAYS,
   WEEKLY_LOOKBACK_DAYS,
@@ -67,6 +73,8 @@ type SpaceFilters = {
   viewerId?: string;
 };
 type FeedScope = 'public' | 'following';
+type PresenceRow = { event_id: string; occurrence_date: string; user_id: string; created_at: string };
+type RsvpRow = PresenceRow & { status: RsvpStatus };
 type FeedOptions = {
   currentUserId?: string;
   scope?: FeedScope;
@@ -85,7 +93,9 @@ const localState = {
   sessionRatings: {} as Record<string, number>,
   events: null as SpaceEvent[] | null,
   hostedEvents: null as SpaceEvent[] | null,
-  rsvps: [] as { event_id: string; user_id: string; status: RsvpStatus; created_at: string }[],
+  rsvps: [] as RsvpRow[],
+  checkins: [] as PresenceRow[],
+  messages: [] as EventMessage[],
   photos: [...demoPhotos],
 };
 
@@ -1402,6 +1412,15 @@ type StoredEventRow = Omit<EventRow, 'dedupe_key'> & {
   cancelled_at?: string | null;
 };
 
+const EMPTY_PRESENCE = {
+  going_count: 0,
+  going: [] as Profile[],
+  viewer_going: false,
+  here_count: 0,
+  here: [] as Profile[],
+  viewer_here: false,
+};
+
 const rowToSpaceEvent = (
   row: StoredEventRow,
   space: SpaceWithAttributes,
@@ -1431,9 +1450,7 @@ const rowToSpaceEvent = (
   created_at: row.created_at || row.source_created_at,
   space,
   profile,
-  going_count: 0,
-  going: [],
-  viewer_going: false,
+  ...EMPTY_PRESENCE,
 });
 
 function extractSpaceEvents(
@@ -1514,6 +1531,14 @@ async function fetchRemoteEvents(query: EventQuery): Promise<SpaceEvent[] | null
   });
 }
 
+// Several reviews can mention the same trivia night. RSVPs attach to whichever mention represents it,
+// so the pick has to stay the same between loads or headcounts would jump around.
+const mentionRichness = (event: SpaceEvent) => Number(Boolean(event.link_url)) + Number(Boolean(event.start_time));
+const isBetterMention = (candidate: SpaceEvent, current: SpaceEvent) =>
+  mentionRichness(candidate) - mentionRichness(current)
+  || current.source_created_at.localeCompare(candidate.source_created_at)
+  || current.id.localeCompare(candidate.id);
+
 function buildOccurrences(events: SpaceEvent[], query: EventQuery): CalendarOccurrence[] {
   const byKey = new Map<string, CalendarOccurrence>();
 
@@ -1532,9 +1557,7 @@ function buildOccurrences(events: SpaceEvent[], query: EventQuery): CalendarOccu
       }
 
       existing.mention_count += 1;
-      const isRicher = Number(Boolean(event.link_url)) + Number(Boolean(event.start_time)) >
-        Number(Boolean(existing.event.link_url)) + Number(Boolean(existing.event.start_time));
-      if (isRicher) existing.event = event;
+      if (isBetterMention(event, existing.event) > 0) existing.event = event;
     });
   });
 
@@ -1562,20 +1585,90 @@ export async function listEventsNearby(query: EventQuery): Promise<CalendarOccur
   const remoteEvents = await fetchRemoteEvents(query);
   const remoteIds = new Set((remoteEvents || []).map((event) => event.id));
   const hosted = remoteEvents ? [] : getLocalHosted(query.viewerId);
-  const withRsvps = remoteEvents ? await attachRemoteRsvps(remoteEvents, query.viewerId) : [];
-  const events = (remoteEvents
-    ? [...withRsvps, ...localEvents.filter((event) => !remoteIds.has(event.id))]
-    : [...localEvents, ...hosted]
-  ).filter((event) => canShowInLists(event, query.viewerId, Boolean(query.includePrivate)));
+  const events = remoteEvents
+    ? [...remoteEvents, ...localEvents.filter((event) => !remoteIds.has(event.id))]
+    : [...localEvents, ...hosted];
 
-  const occurrences = buildOccurrences(events, query);
+  const built = buildOccurrences(events.filter((event) => !event.cancelled_at), query);
+  const { startKey, endKey } = getMonthRange(query.monthStart);
+  const presence = await loadPresence(built.map((occurrence) => occurrence.event.id), { from: startKey, to: endKey });
+  const occurrences = built
+    .map((occurrence) => ({ ...occurrence, event: applyPresence(occurrence.event, occurrence.date, presence, query.viewerId) }))
+    .filter((occurrence) => canShowInLists(occurrence.event, query.viewerId, Boolean(query.includePrivate)));
   eventCache.set(cacheKey, occurrences);
   return occurrences;
+}
+
+type Presence = { rsvps: RsvpRow[]; checkins: PresenceRow[]; profiles: Record<string, Profile> };
+
+const placeholderProfile = (userId: string, createdAt = ''): Profile => ({
+  id: userId,
+  user_id: userId,
+  created_at: createdAt,
+  updated_at: createdAt,
+});
+
+const isLocalEventId = (eventId: string) => !isSupabaseConfigured || !supabase || !isUuid(eventId);
+
+function applyPresence(event: SpaceEvent, date: string | undefined, presence: Presence, viewerId?: string): SpaceEvent {
+  if (!date) return event;
+  const matches = (row: PresenceRow) => row.event_id === event.id && row.occurrence_date === date;
+  const toPeople = (rows: PresenceRow[]) => rows
+    .sort((first, second) => first.created_at.localeCompare(second.created_at))
+    .map((row) => presence.profiles[row.user_id] || placeholderProfile(row.user_id, row.created_at));
+  const rsvps = presence.rsvps.filter(matches);
+  const checkins = presence.checkins.filter(matches);
+  const going = toPeople(rsvps.filter((row) => row.status === 'going'));
+  const here = toPeople(checkins);
+  const viewerRsvp = viewerId ? rsvps.find((row) => row.user_id === viewerId)?.status : undefined;
+  return {
+    ...event,
+    occurrence_date: date,
+    going,
+    going_count: going.length,
+    viewer_going: viewerRsvp === 'going',
+    viewer_rsvp: viewerRsvp,
+    here,
+    here_count: here.length,
+    viewer_here: Boolean(viewerId && checkins.some((row) => row.user_id === viewerId)),
+  };
+}
+
+function localPresence(eventIds: string[]): Presence {
+  const ids = new Set(eventIds);
+  const rsvps = localState.rsvps.filter((row) => ids.has(row.event_id));
+  const checkins = localState.checkins.filter((row) => ids.has(row.event_id));
+  const profiles: Record<string, Profile> = {};
+  [...rsvps, ...checkins].forEach((row) => {
+    const profile = findLocalProfile(row.user_id);
+    if (profile) profiles[row.user_id] = profile;
+  });
+  return { rsvps, checkins, profiles };
+}
+
+async function loadPresence(eventIds: string[], range?: { from: string; to: string }): Promise<Presence> {
+  const presence = localPresence(eventIds);
+  const remoteIds = Array.from(new Set(eventIds.filter((id) => !isLocalEventId(id))));
+  if (!supabase || remoteIds.length === 0) return presence;
+
+  const scoped = (builder: any) => (range ? builder.gte('occurrence_date', range.from).lte('occurrence_date', range.to) : builder);
+  const [rsvpResult, checkinResult] = await Promise.all([
+    scoped(supabase.from('event_rsvps').select('event_id, occurrence_date, user_id, status, created_at').in('event_id', remoteIds)),
+    scoped(supabase.from('event_checkins').select('event_id, occurrence_date, user_id, created_at').in('event_id', remoteIds)),
+  ]);
+  if (rsvpResult.error) console.warn('Could not load RSVPs:', rsvpResult.error.message);
+  if (checkinResult.error) console.warn('Could not load check-ins:', checkinResult.error.message);
+
+  const rsvps = [...presence.rsvps, ...((rsvpResult.data || []) as RsvpRow[])];
+  const checkins = [...presence.checkins, ...((checkinResult.data || []) as PresenceRow[])];
+  const remoteProfiles = await fetchProfilesByUserId(Array.from(new Set([...rsvps, ...checkins].map((row) => row.user_id))));
+  return { rsvps, checkins, profiles: { ...presence.profiles, ...remoteProfiles } };
 }
 
 const DEMO_COFFEE_EVENT = 'hosted-demo-coffee';
 const DEMO_PRIVATE_EVENT = 'hosted-demo-game';
 const DEMO_PICKUP_EVENT = 'hosted-demo-pickup';
+const DEMO_LIVE_EVENT = 'hosted-demo-live';
 
 const createUuid = () => globalThis.crypto?.randomUUID?.() ?? 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (char) => {
   const random = Math.floor(Math.random() * 16);
@@ -1620,20 +1713,16 @@ const canReadEvent = (event: SpaceEvent, viewerId: string | undefined, token?: s
 };
 
 function hydrateHosted(event: SpaceEvent, viewerId?: string): SpaceEvent {
-  const rsvps = localState.rsvps.filter((rsvp) => rsvp.event_id === event.id);
-  const goingIds = rsvps.filter((rsvp) => rsvp.status === 'going').map((rsvp) => rsvp.user_id);
-  const going = goingIds
-    .map((userId) => findLocalProfile(userId))
-    .filter((profile): profile is Profile => Boolean(profile));
-  const viewerRsvp = viewerId ? rsvps.find((rsvp) => rsvp.user_id === viewerId)?.status : undefined;
-  return {
-    ...event,
-    going,
-    going_count: goingIds.length,
-    viewer_going: viewerRsvp === 'going',
-    viewer_rsvp: viewerRsvp,
-    profile: event.profile || findLocalProfile(event.host_user_id),
-  };
+  return applyPresence(
+    { ...event, profile: event.profile || findLocalProfile(event.host_user_id) },
+    event.event_date,
+    localPresence([event.id]),
+    viewerId
+  );
+}
+
+function withLocalPresence(event: SpaceEvent, date: string | undefined, viewerId?: string): SpaceEvent {
+  return applyPresence(event, date, localPresence([event.id]), viewerId);
 }
 
 function seedDemoHosted() {
@@ -1668,13 +1757,29 @@ function seedDemoHosted() {
       created_at: timestamp,
       space: cafe,
       profile: mike,
-      going_count: 0,
-      going: [],
-      viewer_going: false,
+      ...EMPTY_PRESENCE,
     });
     localState.rsvps.push(
-      { event_id: DEMO_COFFEE_EVENT, user_id: demoCurrentUserId, status: 'going', created_at: timestamp },
-      { event_id: DEMO_COFFEE_EVENT, user_id: 'user-emma', status: 'going', created_at: timestamp }
+      { event_id: DEMO_COFFEE_EVENT, occurrence_date: daysFromToday(2), user_id: demoCurrentUserId, status: 'going', created_at: timestamp },
+      { event_id: DEMO_COFFEE_EVENT, occurrence_date: daysFromToday(2), user_id: 'user-emma', status: 'going', created_at: timestamp }
+    );
+    localState.messages.push(
+      {
+        id: createId('message'),
+        event_id: DEMO_COFFEE_EVENT,
+        occurrence_date: daysFromToday(2),
+        user_id: mike.user_id,
+        body: 'I will get there around 5:45 to hold the big table.',
+        created_at: new Date(Date.now() - 20 * 60 * 1000).toISOString(),
+      },
+      {
+        id: createId('message'),
+        event_id: DEMO_COFFEE_EVENT,
+        occurrence_date: daysFromToday(2),
+        user_id: 'user-emma',
+        body: 'Bringing my laptop, might stay after.',
+        created_at: timestamp,
+      }
     );
   }
 
@@ -1701,14 +1806,12 @@ function seedDemoHosted() {
       created_at: timestamp,
       space: court,
       profile: sarah,
-      going_count: 0,
-      going: [],
-      viewer_going: false,
+      ...EMPTY_PRESENCE,
     });
     localState.rsvps.push(
-      { event_id: DEMO_PICKUP_EVENT, user_id: 'user-mike', status: 'going', created_at: timestamp },
-      { event_id: DEMO_PICKUP_EVENT, user_id: 'user-nina', status: 'going', created_at: timestamp },
-      { event_id: DEMO_PICKUP_EVENT, user_id: 'user-emma', status: 'not_going', created_at: timestamp }
+      { event_id: DEMO_PICKUP_EVENT, occurrence_date: daysFromToday(3), user_id: 'user-mike', status: 'going', created_at: timestamp },
+      { event_id: DEMO_PICKUP_EVENT, occurrence_date: daysFromToday(3), user_id: 'user-nina', status: 'going', created_at: timestamp },
+      { event_id: DEMO_PICKUP_EVENT, occurrence_date: daysFromToday(3), user_id: 'user-emma', status: 'not_going', created_at: timestamp }
     );
   }
 
@@ -1734,10 +1837,45 @@ function seedDemoHosted() {
       created_at: timestamp,
       space: board,
       profile: sarah,
-      going_count: 0,
-      going: [],
-      viewer_going: false,
+      ...EMPTY_PRESENCE,
     });
+  }
+
+  // Started an hour ago so the "I'm here" flow is visible in demo mode.
+  if (board && mike) {
+    const today = daysFromToday(0);
+    events.push({
+      id: DEMO_LIVE_EVENT,
+      space_id: board.id,
+      source_type: 'hosted',
+      source_id: DEMO_LIVE_EVENT,
+      source_user_id: mike.user_id,
+      host_user_id: mike.user_id,
+      visibility: 'public',
+      theme: 'night',
+      title: 'Board game night',
+      kind: 'one_time',
+      event_date: today,
+      start_time: `${String(Math.max(0, new Date().getHours() - 1)).padStart(2, '0')}:00`,
+      snippet: 'Catan and Codenames on the back table. Newcomers welcome.',
+      description: 'Catan and Codenames on the back table. Newcomers welcome.',
+      capacity: 6,
+      allow_over_capacity: false,
+      invite_token: 'demo-board-game-night',
+      source_created_at: timestamp,
+      created_at: timestamp,
+      space: board,
+      profile: mike,
+      ...EMPTY_PRESENCE,
+    });
+    localState.rsvps.push(
+      { event_id: DEMO_LIVE_EVENT, occurrence_date: today, user_id: 'user-nina', status: 'going', created_at: timestamp },
+      { event_id: DEMO_LIVE_EVENT, occurrence_date: today, user_id: 'user-emma', status: 'going', created_at: timestamp }
+    );
+    localState.checkins.push(
+      { event_id: DEMO_LIVE_EVENT, occurrence_date: today, user_id: 'user-mike', created_at: timestamp },
+      { event_id: DEMO_LIVE_EVENT, occurrence_date: today, user_id: 'user-nina', created_at: timestamp }
+    );
   }
 
   localState.hostedEvents = events;
@@ -1791,62 +1929,30 @@ function profileFromPayload(row: Record<string, unknown> | null | undefined): Pr
   };
 }
 
-async function attachRemoteRsvps(events: SpaceEvent[], viewerId?: string): Promise<SpaceEvent[]> {
-  const ids = events.map((event) => event.id).filter(isUuid);
-  if (!supabase || ids.length === 0) return events;
-
-  const { data, error } = await supabase.from('event_rsvps').select('event_id, user_id, status').in('event_id', ids);
-  if (error) {
-    console.warn('Could not load RSVPs:', error.message);
-    return events;
-  }
-
-  const allRows = (data || []) as { event_id: string; user_id: string; status: RsvpStatus }[];
-  const rows = allRows.filter((row) => row.status === 'going');
-  const viewerStatus = new Map(allRows.filter((row) => row.user_id === viewerId).map((row) => [row.event_id, row.status]));
-  const profiles = await fetchProfilesByUserId(rows.map((row) => row.user_id));
-  const byEvent = new Map<string, Profile[]>();
-  rows.forEach((row) => {
-    const list = byEvent.get(row.event_id) || [];
-    list.push(profiles[row.user_id] || {
-      id: row.user_id,
-      user_id: row.user_id,
-      created_at: '',
-      updated_at: '',
-    });
-    byEvent.set(row.event_id, list);
-  });
-
-  return events.map((event) => {
-    const going = byEvent.get(event.id) || event.going;
-    const viewerRsvp = viewerStatus.get(event.id);
-    return {
-      ...event,
-      going,
-      going_count: going.length,
-      viewer_going: viewerRsvp === 'going',
-      viewer_rsvp: viewerRsvp,
-    };
-  });
-}
+const profilesFromPayload = (value: unknown) => (Array.isArray(value)
+  ? value.map((row) => profileFromPayload(row as Record<string, unknown>)).filter((profile): profile is Profile => Boolean(profile))
+  : []);
 
 function mapFetchedEvent(payload: Record<string, unknown>, viewerId?: string): SpaceEvent | null {
   const eventRow = payload.event as Record<string, unknown> | undefined;
   const spaceRow = payload.space as Record<string, unknown> | undefined;
   if (!eventRow || !spaceRow) return null;
-  const going = Array.isArray(payload.going)
-    ? payload.going.map((row) => profileFromPayload(row as Record<string, unknown>)).filter((profile): profile is Profile => Boolean(profile))
-    : [];
+  const going = profilesFromPayload(payload.going);
+  const here = profilesFromPayload(payload.here);
   const event = rowToSpaceEvent(mapStoredEventRow(eventRow), mapSpaceRow(spaceRow), profileFromPayload(payload.host as Record<string, unknown> | undefined));
   const viewerRsvp = payload.viewer_status === 'going' || payload.viewer_status === 'not_going'
     ? payload.viewer_status as RsvpStatus
     : undefined;
   return {
     ...event,
+    occurrence_date: typeof payload.occurrence_date === 'string' ? payload.occurrence_date : event.event_date,
     going,
     going_count: going.length,
     viewer_going: viewerRsvp === 'going' || Boolean(viewerId && going.some((person) => person.user_id === viewerId)),
     viewer_rsvp: viewerRsvp,
+    here,
+    here_count: here.length,
+    viewer_here: Boolean(payload.viewer_here) || Boolean(viewerId && here.some((person) => person.user_id === viewerId)),
   };
 }
 
@@ -1971,9 +2077,7 @@ export async function createHostedEvent(userId: string, input: CreateHostedEvent
     created_at: timestamp,
     space,
     profile,
-    going_count: 0,
-    going: [],
-    viewer_going: false,
+    ...EMPTY_PRESENCE,
   };
 
   if (!canUseUserScopedRemote(userId)) {
@@ -2032,14 +2136,16 @@ export async function updateHostedEventTheme(userId: string, eventId: string, th
   eventCache.clear();
 }
 
-export async function getEvent(eventId: string, viewerId?: string, token?: string): Promise<SpaceEvent | null> {
-  if (!isSupabaseConfigured || !supabase || !isUuid(eventId)) {
+// `date` picks the occurrence for weekly events; one-time events always use their own date.
+export async function getEvent(eventId: string, viewerId?: string, token?: string, date?: string): Promise<SpaceEvent | null> {
+  if (isLocalEventId(eventId)) {
     const hosted = getLocalHosted(viewerId).find((event) => event.id === eventId);
     if (hosted) return canReadEvent(hosted, viewerId, token) ? hosted : null;
-    return getLocalEvents().find((event) => event.id === eventId) || null;
+    const mentioned = getLocalEvents().find((event) => event.id === eventId);
+    return mentioned ? withLocalPresence(mentioned, resolveOccurrenceDate(mentioned, date), viewerId) : null;
   }
 
-  const { data, error } = await supabase.rpc('fetch_event', { target_id: eventId, token: token || null });
+  const { data, error } = await supabase.rpc('fetch_event', { target_id: eventId, token: token || null, occurrence: date || null });
   if (!error && data) return mapFetchedEvent(data as Record<string, unknown>, viewerId);
   if (error) console.warn('fetch_event failed, trying a direct read:', error.message);
 
@@ -2052,32 +2158,78 @@ export async function getEvent(eventId: string, viewerId?: string, token?: strin
   const stored = mapStoredEventRow(row as Record<string, unknown>);
   const hostId = stored.host_user_id || stored.source_user_id;
   const profiles = hostId ? await fetchProfilesByUserId([hostId]) : {};
-  const [event] = await attachRemoteRsvps([
-    rowToSpaceEvent(stored, mapSpaceRow((row as Record<string, unknown>).spaces as Record<string, unknown>), hostId ? profiles[hostId] : undefined),
-  ], viewerId);
+  const event = rowToSpaceEvent(stored, mapSpaceRow((row as Record<string, unknown>).spaces as Record<string, unknown>), hostId ? profiles[hostId] : undefined);
+  return applyPresence(event, resolveOccurrenceDate(event, date), await loadPresence([event.id]), viewerId);
+}
+
+function findLocalEventForPresence(eventId: string, userId: string, token?: string) {
+  const event = getLocalHosted(userId).find((item) => item.id === eventId)
+    || getLocalEvents().find((item) => item.id === eventId);
+  if (!event || event.cancelled_at) throw new Error('Event not found');
+  if (!canReadEvent(event, userId, token)) throw new Error('You need an invite for this one');
   return event;
 }
 
-export async function setEventRsvp(userId: string, eventId: string, status: RsvpStatus | null, token?: string): Promise<void> {
+export async function setEventRsvp(
+  userId: string,
+  eventId: string,
+  status: RsvpStatus | null,
+  token?: string,
+  date?: string
+): Promise<void> {
   if (isSupabaseConfigured && supabase && !isUuid(userId)) throw new Error('Sign in to RSVP');
 
-  if (!canUseUserScopedRemote(userId)) {
-    const event = getLocalHosted(userId).find((item) => item.id === eventId);
-    if (!event || event.source_type !== 'hosted' || event.cancelled_at) throw new Error('Event not found');
-    if (!canReadEvent(event, userId, token)) throw new Error('You need an invite to RSVP');
-    const others = localState.rsvps.filter((rsvp) => !(rsvp.event_id === eventId && rsvp.user_id === userId));
+  if (isLocalEventId(eventId) || !canUseUserScopedRemote(userId)) {
+    const event = findLocalEventForPresence(eventId, userId, token);
+    const occurrence = resolveOccurrenceDate(event, date);
+    if (!occurrence) throw new Error('Pick a date for this event');
+    if (status && getEventPhase(event, occurrence) === 'ended') throw new Error('This event already happened');
+    const isSameSlot = (rsvp: RsvpRow) => rsvp.event_id === eventId && rsvp.occurrence_date === occurrence;
+    const others = localState.rsvps.filter((rsvp) => !(isSameSlot(rsvp) && rsvp.user_id === userId));
     if (status === 'going' && event.capacity && !event.allow_over_capacity) {
-      const count = others.filter((rsvp) => rsvp.event_id === eventId && rsvp.status === 'going').length;
+      const count = others.filter((rsvp) => isSameSlot(rsvp) && rsvp.status === 'going').length;
       if (count >= event.capacity) throw new Error('This event is full');
     }
     localState.rsvps = status
-      ? [...others, { event_id: eventId, user_id: userId, status, created_at: toIso() }]
+      ? [...others, { event_id: eventId, occurrence_date: occurrence, user_id: userId, status, created_at: toIso() }]
       : others;
     eventCache.clear();
     return;
   }
 
-  const { error } = await supabase.rpc('set_event_rsvp', { target_id: eventId, rsvp_status: status, token: token || null });
+  const { error } = await supabase.rpc('set_event_rsvp', {
+    target_id: eventId,
+    rsvp_status: status,
+    token: token || null,
+    occurrence: date || null,
+  });
+  if (error) throw new Error(error.message);
+  eventCache.clear();
+}
+
+export async function setEventCheckin(userId: string, eventId: string, here: boolean, token?: string, date?: string): Promise<void> {
+  if (isSupabaseConfigured && supabase && !isUuid(userId)) throw new Error('Sign in to check in');
+
+  if (isLocalEventId(eventId) || !canUseUserScopedRemote(userId)) {
+    const event = findLocalEventForPresence(eventId, userId, token);
+    const occurrence = resolveOccurrenceDate(event, date);
+    if (!occurrence) throw new Error('Pick a date for this event');
+    if (here && getEventPhase(event, occurrence) !== 'live') throw new Error('You can only check in while it is happening');
+    const others = localState.checkins.filter((row) =>
+      !(row.event_id === eventId && row.occurrence_date === occurrence && row.user_id === userId));
+    localState.checkins = here
+      ? [...others, { event_id: eventId, occurrence_date: occurrence, user_id: userId, created_at: toIso() }]
+      : others;
+    eventCache.clear();
+    return;
+  }
+
+  const { error } = await supabase.rpc('set_event_checkin', {
+    target_id: eventId,
+    is_here: here,
+    token: token || null,
+    occurrence: date || null,
+  });
   if (error) throw new Error(error.message);
   eventCache.clear();
 }
@@ -2117,12 +2269,15 @@ export async function listSpaceEvents(spaceId: string, viewerId?: string): Promi
         const hostId = (row.host_user_id as string | null) || (row.source_user_id as string | null);
         return rowToSpaceEvent(mapStoredEventRow(row), mapSpaceRow(row.spaces as Record<string, unknown>), hostId ? profiles[hostId] : undefined);
       });
-      remote = await attachRemoteRsvps(mapped, viewerId);
+      remote = mapped;
     }
   }
 
+  const candidates = [...remote, ...getLocalEvents().filter((event) => event.space_id === spaceId), ...localHosted];
+  const presence = await loadPresence(candidates.map((event) => event.id));
   const seen = new Set<string>();
-  return [...remote, ...getLocalEvents().filter((event) => event.space_id === spaceId), ...localHosted]
+  return candidates
+    .map((event) => applyPresence(event, nextOccurrenceDate(event), presence, viewerId))
     .filter((event) => {
       const signature = `${event.source_type}|${event.title}|${event.event_date ?? ''}|${event.weekday ?? ''}`;
       if (seen.has(signature) || !canShowInLists(event, viewerId, true, true)) return false;
@@ -2130,6 +2285,109 @@ export async function listSpaceEvents(spaceId: string, viewerId?: string): Promi
       seen.add(signature);
       return true;
     })
-    .sort((first, second) => (first.event_date || '9999').localeCompare(second.event_date || '9999')
+    .sort((first, second) => (first.occurrence_date || '9999').localeCompare(second.occurrence_date || '9999')
       || (first.start_time || '99:99').localeCompare(second.start_time || '99:99'));
+}
+
+const mapMessageRow = (row: Record<string, unknown>, profiles: Record<string, Profile>): EventMessage => ({
+  id: String(row.id),
+  event_id: String(row.event_id),
+  occurrence_date: String(row.occurrence_date),
+  user_id: String(row.user_id),
+  body: String(row.body || ''),
+  created_at: String(row.created_at),
+  profile: profiles[String(row.user_id)] || findLocalProfile(String(row.user_id)),
+});
+
+type MessageListener = (message: EventMessage) => void;
+const localChatListeners = new Map<string, Set<MessageListener>>();
+const chatKey = (eventId: string, date: string) => `${eventId}|${date}`;
+
+/** The host and people going for that date are in the chat, and it closes the day after the event. */
+export function canUseEventChat(event: SpaceEvent, viewerId?: string) {
+  if (!viewerId || event.cancelled_at || !event.occurrence_date) return false;
+  if (!isChatOpen(event.occurrence_date)) return false;
+  return event.host_user_id === viewerId || event.viewer_going;
+}
+
+export async function listEventMessages(eventId: string, date: string): Promise<EventMessage[]> {
+  if (isLocalEventId(eventId)) {
+    if (!isChatOpen(date)) return [];
+    return byCreatedAtDesc(localState.messages.filter((message) => message.event_id === eventId && message.occurrence_date === date))
+      .reverse()
+      .map((message) => ({ ...message, profile: findLocalProfile(message.user_id) }));
+  }
+
+  const { data, error } = await supabase
+    .from('event_messages')
+    .select('*')
+    .eq('event_id', eventId)
+    .eq('occurrence_date', date)
+    .order('created_at', { ascending: false })
+    .limit(300);
+  if (error) throw new Error(error.message);
+  const rows = ((data || []) as Record<string, unknown>[]).reverse();
+  const profiles = await fetchProfilesByUserId(Array.from(new Set(rows.map((row) => String(row.user_id)))));
+  return rows.map((row) => mapMessageRow(row, profiles));
+}
+
+export async function sendEventMessage(userId: string, event: SpaceEvent, body: string): Promise<EventMessage> {
+  const text = body.trim();
+  if (!text) throw new Error('Write something first.');
+  if (text.length > MAX_EVENT_MESSAGE_LENGTH) throw new Error(`Keep it under ${MAX_EVENT_MESSAGE_LENGTH} characters.`);
+  if (!canUseEventChat(event, userId) || !event.occurrence_date) throw new Error('RSVP going to join the chat.');
+  if (isSupabaseConfigured && supabase && !isUuid(userId)) throw new Error('Sign in to chat');
+
+  if (isLocalEventId(event.id) || !canUseUserScopedRemote(userId)) {
+    const message: EventMessage = {
+      id: createId('message'),
+      event_id: event.id,
+      occurrence_date: event.occurrence_date,
+      user_id: userId,
+      body: text,
+      created_at: toIso(),
+      profile: findLocalProfile(userId),
+    };
+    localState.messages.push(message);
+    localChatListeners.get(chatKey(event.id, event.occurrence_date))?.forEach((listener) => listener(message));
+    return message;
+  }
+
+  const { data, error } = await supabase
+    .from('event_messages')
+    .insert({ event_id: event.id, occurrence_date: event.occurrence_date, user_id: userId, body: text })
+    .select()
+    .single();
+  if (error) throw new Error(error.message);
+  const profiles = await fetchProfilesByUserId([userId]);
+  return mapMessageRow(data as Record<string, unknown>, profiles);
+}
+
+/** Calls `onMessage` for every new message in the chat. Returns an unsubscribe function. */
+export function subscribeToEventMessages(eventId: string, date: string, onMessage: MessageListener): () => void {
+  if (isLocalEventId(eventId)) {
+    const key = chatKey(eventId, date);
+    const listeners = localChatListeners.get(key) || new Set<MessageListener>();
+    listeners.add(onMessage);
+    localChatListeners.set(key, listeners);
+    return () => {
+      listeners.delete(onMessage);
+    };
+  }
+
+  const channel = supabase
+    .channel(`event-chat-${eventId}-${date}`)
+    .on(
+      'postgres_changes',
+      { event: 'INSERT', schema: 'public', table: 'event_messages', filter: `event_id=eq.${eventId}` },
+      async (payload: { new: Record<string, unknown> }) => {
+        if (String(payload.new.occurrence_date) !== date) return;
+        const profiles = await fetchProfilesByUserId([String(payload.new.user_id)]);
+        onMessage(mapMessageRow(payload.new, profiles));
+      }
+    )
+    .subscribe();
+  return () => {
+    supabase.removeChannel(channel);
+  };
 }
