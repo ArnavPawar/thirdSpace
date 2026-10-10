@@ -1,13 +1,14 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ActivityIndicator, Alert, Pressable, RefreshControl, ScrollView, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { useFocusEffect } from 'expo-router';
+import { router, useFocusEffect } from 'expo-router';
 import * as Location from 'expo-location';
-import { CalendarDays, ChevronDown, ChevronUp, Repeat } from 'lucide-react-native';
+import { CalendarDays, ChevronDown, ChevronUp, Plus, Repeat } from 'lucide-react-native';
 import EventCard from '@/components/EventCard';
 import MonthGrid from '@/components/MonthGrid';
 import RangeBar, { RANGE_STOPS } from '@/components/RangeBar';
 import { EmptyState, ScreenHeader, SectionTitle } from '@/components/ui';
+import { useAuth } from '@/lib/auth';
 import { listEventsNearby } from '@/lib/data';
 import { parseDateKey, toDateKey } from '@/lib/events';
 import { colors } from '@/lib/theme';
@@ -19,9 +20,12 @@ const RANGE_DEBOUNCE_MS = 250;
 
 const firstOfMonth = (date: Date) => new Date(date.getFullYear(), date.getMonth(), 1);
 const eventIdentity = (occurrence: CalendarOccurrence) =>
-  `${occurrence.event.space_id}|${occurrence.event.title}|${occurrence.event.kind === 'weekly' ? `w${occurrence.event.weekday}` : occurrence.date}`;
+  occurrence.event.source_type === 'hosted'
+    ? occurrence.event.id
+    : `${occurrence.event.space_id}|${occurrence.event.title}|${occurrence.event.kind === 'weekly' ? `w${occurrence.event.weekday}` : occurrence.date}`;
 
 export default function CalendarScreen() {
+  const { userId } = useAuth();
   const [monthStart, setMonthStart] = useState(() => firstOfMonth(new Date()));
   const [selectedDate, setSelectedDate] = useState<string | null>(null);
   const [radius, setRadius] = useState(DEFAULT_RADIUS);
@@ -61,7 +65,7 @@ export default function CalendarScreen() {
   const load = useCallback(async (force = false) => {
     const id = ++requestId.current;
     try {
-      const next = await listEventsNearby({ monthStart, center, radiusMiles: queryRadius, force });
+      const next = await listEventsNearby({ monthStart, center, radiusMiles: queryRadius, viewerId: userId, includePrivate: true, force });
       if (id === requestId.current) setOccurrences(next);
     } catch {
       Alert.alert('Calendar Error', 'Could not load events nearby.');
@@ -71,7 +75,7 @@ export default function CalendarScreen() {
         setRefreshing(false);
       }
     }
-  }, [center, monthStart, queryRadius]);
+  }, [center, monthStart, queryRadius, userId]);
 
   useFocusEffect(
     useCallback(() => {
@@ -153,6 +157,17 @@ export default function CalendarScreen() {
         <ScreenHeader
           title="Calendar"
           subtitle={hasUserLocation ? "What's happening near you" : "What's happening around Arlington, VA"}
+          right={(
+            <Pressable
+              onPress={() => router.push('/event/new' as never)}
+              accessibilityRole="button"
+              accessibilityLabel="Create event"
+              className="bg-primary rounded-full px-4 h-11 flex-row items-center"
+            >
+              <Plus size={16} color="white" />
+              <Text className="text-white font-bold ml-1.5">Create</Text>
+            </Pressable>
+          )}
         />
 
         <View className="px-4 gap-3">
@@ -181,10 +196,15 @@ export default function CalendarScreen() {
             <EmptyState
               icon={CalendarDays}
               title="Nothing on the calendar nearby"
-              body={'Events show up here when reviews mention them, like "trivia every Tuesday at 8pm".'}
-              actionLabel={nextWiderRadius ? `Widen to ${nextWiderRadius} mi` : undefined}
-              onAction={nextWiderRadius ? () => setRadius(nextWiderRadius) : undefined}
+              body="Host a hangout, or widen the range. Review mentions like trivia night still show up here too."
+              actionLabel="Create event"
+              onAction={() => router.push('/event/new' as never)}
             />
+            {nextWiderRadius && (
+              <Pressable onPress={() => setRadius(nextWiderRadius)} className="items-center mt-3">
+                <Text className="text-primary font-semibold">Widen to {nextWiderRadius} mi</Text>
+              </Pressable>
+            )}
           </View>
         ) : (
           <View className="px-4 mt-6">

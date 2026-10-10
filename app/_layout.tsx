@@ -37,6 +37,29 @@ export default function RootLayout() {
           }}
         />
         <Stack.Screen
+          name="event/new"
+          options={{
+            headerShown: true,
+            presentation: 'modal',
+            title: 'Host an event',
+            headerBackTitle: 'Close',
+            headerShadowVisible: false,
+            headerTintColor: colors.ink,
+            headerStyle: { backgroundColor: colors.background },
+          }}
+        />
+        <Stack.Screen
+          name="event/[id]"
+          options={{
+            headerShown: true,
+            title: '',
+            headerBackTitle: 'Back',
+            headerShadowVisible: false,
+            headerTintColor: colors.ink,
+            headerStyle: { backgroundColor: colors.background },
+          }}
+        />
+        <Stack.Screen
           name="user/[id]"
           options={{
             headerShown: true,

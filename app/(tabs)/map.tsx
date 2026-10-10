@@ -16,13 +16,14 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import MapView, { Circle, Marker, type Region } from 'react-native-maps';
 import * as Location from 'expo-location';
 import { router, useFocusEffect, useLocalSearchParams } from 'expo-router';
-import { Clock, Globe, Heart, KeyRound, LocateFixed, Lock, Navigation, Search, Users, X } from 'lucide-react-native';
+import { CalendarDays, CalendarPlus, Clock, Globe, Heart, KeyRound, LocateFixed, Lock, Navigation, Search, Users, X } from 'lucide-react-native';
 import SecretSpotSheet from '@/components/SecretSpotSheet';
 import { Avatar, CategoryIcon, Chip, OpenStatusBadge, ScorePill, SegmentedControl } from '@/components/ui';
 import { useAuth } from '@/lib/auth';
-import { listRecentActivity, listSecretSpots, listSpaces, toggleFavorite } from '@/lib/data';
+import { listEventsNearby, listRecentActivity, listSecretSpots, listSpaces, toggleFavorite } from '@/lib/data';
+import { upcomingEventsBySpace } from '@/lib/events';
 import { formatDistance, formatTimeAgo, getDisplayName } from '@/lib/format';
-import { openDirections, openProfile } from '@/lib/links';
+import { openDirections, openEvent, openProfile } from '@/lib/links';
 import { rankSearchResults, type SearchFields } from '@/lib/search';
 import { CATEGORY_META, colors } from '@/lib/theme';
 import {
@@ -31,6 +32,7 @@ import {
   type SecretAccessStatus,
   type SecretSpotPreview,
   type SpaceCategory,
+  type SpaceEvent,
   type SpaceWithAttributes,
 } from '@/types/space';
 
@@ -43,7 +45,7 @@ const ARLINGTON_COORDS: Region = {
 
 const MAX_FOCUS_DELTA = 0.04;
 const CARD_GAP = 12;
-const CARD_HEIGHT = 148;
+const CARD_HEIGHT = 188;
 
 type MapMode = 'public' | 'following' | 'secret';
 
@@ -100,20 +102,29 @@ export default function MapScreen() {
   const [userLocation, setUserLocation] = useState<Location.LocationObject | null>(null);
   const [locationPermission, setLocationPermission] = useState<Location.PermissionStatus | null>(null);
   const [isLoading, setIsLoading] = useState(true);
+  const [eventsBySpace, setEventsBySpace] = useState<Record<string, SpaceEvent[]>>({});
+  const [eventChoices, setEventChoices] = useState<SpaceEvent[] | null>(null);
 
   const loadData = useCallback(async () => {
     try {
       const location = userLocation
         ? { latitude: userLocation.coords.latitude, longitude: userLocation.coords.longitude }
         : undefined;
-      const [nextSpaces, nextActivity, nextSecrets] = await Promise.all([
+      const center = location || { latitude: ARLINGTON_COORDS.latitude, longitude: ARLINGTON_COORDS.longitude };
+      const monthStart = new Date();
+      const thisMonth = new Date(monthStart.getFullYear(), monthStart.getMonth(), 1);
+      const nextMonth = new Date(monthStart.getFullYear(), monthStart.getMonth() + 1, 1);
+      const [nextSpaces, nextActivity, nextSecrets, thisMonthEvents, nextMonthEvents] = await Promise.all([
         listSpaces({ viewerId: userId, userLocation: location }),
         listRecentActivity({ currentUserId: userId, scope: 'following' }),
         listSecretSpots(userId),
+        listEventsNearby({ monthStart: thisMonth, center, radiusMiles: 30, viewerId: userId, includePrivate: false }).catch(() => []),
+        listEventsNearby({ monthStart: nextMonth, center, radiusMiles: 30, viewerId: userId, includePrivate: false }).catch(() => []),
       ]);
       setSpaces(nextSpaces);
       setFollowingActivity(nextActivity);
       setSecretSpots(nextSecrets);
+      setEventsBySpace(Object.fromEntries(upcomingEventsBySpace([...thisMonthEvents, ...nextMonthEvents])));
     } catch {
       Alert.alert('Map Error', 'Could not load spaces.');
     } finally {
@@ -318,18 +329,30 @@ export default function MapScreen() {
     const isLockedSecret = item.kind === 'secret' && (item.spot.access === 'locked' || item.spot.access === 'pending');
     const Icon = item.kind === 'secret' ? (isLockedSecret ? Lock : KeyRound) : meta.icon;
     const size = isSelected ? 44 : 34;
+    const spaceEvents = item.kind === 'space' ? eventsBySpace[item.id] : undefined;
+    const hostedHere = spaceEvents?.some((event) => event.source_type === 'hosted');
 
     return (
-      <View
-        style={{
-          width: size,
-          height: size,
-          borderRadius: size / 2,
-          backgroundColor: item.kind === 'secret' ? colors.secret : meta.color,
-        }}
-        className="items-center justify-center border-[3px] border-white shadow-md"
-      >
-        <Icon size={isSelected ? 20 : 16} color="white" />
+      <View>
+        <View
+          style={{
+            width: size,
+            height: size,
+            borderRadius: size / 2,
+            backgroundColor: item.kind === 'secret' ? colors.secret : meta.color,
+          }}
+          className="items-center justify-center border-[3px] border-white shadow-md"
+        >
+          <Icon size={isSelected ? 20 : 16} color="white" />
+        </View>
+        {spaceEvents && spaceEvents.length > 0 && (
+          <View
+            style={{ backgroundColor: hostedHere ? colors.primary : 'white', position: 'absolute', top: -2, right: -2 }}
+            className="w-4 h-4 rounded-full border-2 border-white items-center justify-center"
+          >
+            <CalendarDays size={8} color={hostedHere ? 'white' : meta.color} />
+          </View>
+        )}
       </View>
     );
   };
@@ -341,6 +364,11 @@ export default function MapScreen() {
     if (item.kind === 'space') {
       const { space } = item;
       const distance = formatDistance(space.distance);
+      const spaceEvents = eventsBySpace[space.id] || [];
+      const openEvents = () => {
+        if (spaceEvents.length === 1) openEvent(spaceEvents[0].id);
+        else if (spaceEvents.length > 1) setEventChoices(spaceEvents);
+      };
       return (
         <TouchableOpacity activeOpacity={0.9} onPress={() => focusItem(item)} style={{ width: cardWidth, height: CARD_HEIGHT }} className={cardClass}>
           <View className="flex-row items-center">
@@ -356,6 +384,14 @@ export default function MapScreen() {
             </View>
             {space.attributes && <ScorePill score={space.attributes.overall_score} />}
           </View>
+          {spaceEvents.length > 0 && (
+            <TouchableOpacity onPress={openEvents} activeOpacity={0.7} className="flex-row items-center mt-2">
+              <CalendarDays size={13} color={colors.primary} />
+              <Text numberOfLines={1} className="text-[13px] font-semibold text-primary ml-1.5 flex-1">
+                {spaceEvents.length === 1 ? spaceEvents[0].title : `${spaceEvents.length} hangouts here`}
+              </Text>
+            </TouchableOpacity>
+          )}
           <View className="flex-row mt-auto gap-2">
             <TouchableOpacity onPress={() => openDirections(space)} activeOpacity={0.8} className="flex-1 h-10 rounded-xl bg-slate-100 flex-row items-center justify-center">
               <Navigation size={15} color={colors.ink} />
@@ -363,6 +399,15 @@ export default function MapScreen() {
             </TouchableOpacity>
             <TouchableOpacity onPress={() => router.push(`/space/${space.id}` as never)} activeOpacity={0.8} className="flex-1 h-10 rounded-xl bg-primary items-center justify-center">
               <Text className="font-semibold text-white">View spot</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              onPress={() => router.push({ pathname: '/event/new', params: { spaceId: space.id } } as never)}
+              activeOpacity={0.8}
+              accessibilityLabel="Host an event here"
+              style={{ backgroundColor: colors.primarySoft }}
+              className="w-10 h-10 rounded-xl items-center justify-center"
+            >
+              <CalendarPlus size={18} color={colors.primary} />
             </TouchableOpacity>
             <TouchableOpacity
               onPress={() => handleToggleFavorite(space)}
@@ -466,6 +511,10 @@ export default function MapScreen() {
         showsPointsOfInterests={false}
         onPress={(event) => {
           if (event.nativeEvent.action !== 'marker-press') setSelectedId(null);
+        }}
+        onLongPress={(event) => {
+          const { latitude, longitude } = event.nativeEvent.coordinate;
+          router.push({ pathname: '/event/new', params: { lat: String(latitude), lng: String(longitude) } } as never);
         }}
       >
         {items.map((item) => (
@@ -596,6 +645,32 @@ export default function MapScreen() {
           />
         )}
       </View>
+
+      {eventChoices && (
+        <View className="absolute left-4 right-4 bottom-4 bg-white rounded-3xl border border-slate-200 p-4 shadow-lg">
+          <View className="flex-row items-center mb-2">
+            <Text className="flex-1 text-[17px] font-bold text-ink">Hangouts here</Text>
+            <TouchableOpacity onPress={() => setEventChoices(null)} accessibilityLabel="Close events">
+              <X size={18} color={colors.muted} />
+            </TouchableOpacity>
+          </View>
+          {eventChoices.map((event) => (
+            <TouchableOpacity
+              key={event.id}
+              onPress={() => {
+                setEventChoices(null);
+                openEvent(event.id);
+              }}
+              className="py-3 border-t border-slate-100"
+            >
+              <Text className="font-bold text-ink" numberOfLines={1}>{event.title}</Text>
+              <Text className="text-[13px] text-slate-500 mt-0.5">
+                {event.event_date}{event.start_time ? ` · ${event.start_time}` : ''} · {event.going_count} going
+              </Text>
+            </TouchableOpacity>
+          ))}
+        </View>
+      )}
 
       <SecretSpotSheet
         spot={sheetSpot}

@@ -1,18 +1,23 @@
 import {
   calculateDistanceMiles,
   calculateOverallScore,
+  CATEGORY_CONFIG,
   normalizePurposeForCategory,
   sanitizeAttributeScores,
   type AttributeScores,
   type CalendarOccurrence,
   type CategoryPurpose,
+  type CreateHostedEventInput,
   type EventKind,
   type EventSourceType,
+  type EventTheme,
+  type EventVisibility,
   type FeedActivity,
   type LocalPhoto,
   type Profile,
   type ProfileWithStats,
   type RatingHistoryEntry,
+  type RsvpStatus,
   type ReviewComment,
   type ReviewPhoto,
   type SecretAccessStatus,
@@ -79,6 +84,8 @@ const localState = {
   secretRequests: [...demoSecretRequests],
   sessionRatings: {} as Record<string, number>,
   events: null as SpaceEvent[] | null,
+  hostedEvents: null as SpaceEvent[] | null,
+  rsvps: [] as { event_id: string; user_id: string; status: RsvpStatus; created_at: string }[],
   photos: [...demoPhotos],
 };
 
@@ -1372,6 +1379,8 @@ type EventQuery = {
   monthStart: Date;
   center: { latitude: number; longitude: number };
   radiusMiles: number;
+  viewerId?: string;
+  includePrivate?: boolean;
   force?: boolean;
 };
 
@@ -1380,8 +1389,21 @@ const MILES_PER_DEGREE_LATITUDE = 69;
 const spaceEventText = (space: { description?: string | null; hours?: string | null }) =>
   [space.description, space.hours].filter(Boolean).join('. ');
 
+type StoredEventRow = Omit<EventRow, 'dedupe_key'> & {
+  id?: string;
+  created_at?: string;
+  visibility?: EventVisibility | null;
+  theme?: EventTheme | null;
+  host_user_id?: string | null;
+  invite_token?: string | null;
+  description?: string | null;
+  capacity?: number | null;
+  allow_over_capacity?: boolean | null;
+  cancelled_at?: string | null;
+};
+
 const rowToSpaceEvent = (
-  row: Omit<EventRow, 'dedupe_key'> & { id?: string; created_at?: string },
+  row: StoredEventRow,
   space: SpaceWithAttributes,
   profile?: Profile
 ): SpaceEvent => ({
@@ -1390,6 +1412,9 @@ const rowToSpaceEvent = (
   source_type: row.source_type,
   source_id: row.source_id,
   source_user_id: row.source_user_id || undefined,
+  host_user_id: row.host_user_id || undefined,
+  visibility: row.visibility === 'private' ? 'private' : 'public',
+  theme: isEventTheme(row.theme) ? row.theme : 'indigo',
   title: row.title,
   kind: row.kind,
   event_date: row.event_date || undefined,
@@ -1397,10 +1422,18 @@ const rowToSpaceEvent = (
   start_time: row.start_time || undefined,
   link_url: row.link_url || undefined,
   snippet: row.snippet,
+  description: row.description || undefined,
+  capacity: row.capacity ?? undefined,
+  allow_over_capacity: Boolean(row.allow_over_capacity),
+  invite_token: row.invite_token || undefined,
+  cancelled_at: row.cancelled_at || undefined,
   source_created_at: row.source_created_at,
   created_at: row.created_at || row.source_created_at,
   space,
   profile,
+  going_count: 0,
+  going: [],
+  viewer_going: false,
 });
 
 function extractSpaceEvents(
@@ -1472,37 +1505,26 @@ async function fetchRemoteEvents(query: EventQuery): Promise<SpaceEvent[] | null
 
   const rows = (data || []) as Record<string, unknown>[];
   const profilesByUserId = await fetchProfilesByUserId(
-    Array.from(new Set(rows.map((row) => row.source_user_id).filter(Boolean).map(String)))
+    Array.from(new Set(rows.flatMap((row) => [row.source_user_id, row.host_user_id]).filter(Boolean).map(String)))
   );
 
-  return rows.map((row) => rowToSpaceEvent({
-    id: String(row.id),
-    space_id: String(row.space_id),
-    source_type: row.source_type as EventSourceType,
-    source_id: String(row.source_id),
-    source_user_id: (row.source_user_id as string | null) || undefined,
-    title: String(row.title),
-    kind: row.kind as EventKind,
-    event_date: (row.event_date as string | null) ?? null,
-    weekday: row.weekday === null || row.weekday === undefined ? null : Number(row.weekday),
-    start_time: (row.start_time as string | null) ?? null,
-    link_url: (row.link_url as string | null) ?? null,
-    snippet: String(row.snippet),
-    source_created_at: String(row.source_created_at),
-    created_at: String(row.created_at),
-  }, mapSpaceRow(row.spaces as Record<string, unknown>), profilesByUserId[String(row.source_user_id)]));
+  return rows.map((row) => {
+    const hostId = (row.host_user_id as string | null) || (row.source_user_id as string | null);
+    return rowToSpaceEvent(mapStoredEventRow(row), mapSpaceRow(row.spaces as Record<string, unknown>), hostId ? profilesByUserId[hostId] : undefined);
+  });
 }
 
 function buildOccurrences(events: SpaceEvent[], query: EventQuery): CalendarOccurrence[] {
   const byKey = new Map<string, CalendarOccurrence>();
 
   events.forEach((event) => {
-    if (event.space.is_secret) return;
     const distance = calculateDistanceMiles(query.center, event.space);
     if (distance > query.radiusMiles) return;
 
     expandEventDates(event, query.monthStart).forEach((date) => {
-      const key = `${event.space_id}|${event.title}|${date}`;
+      const key = event.source_type === 'hosted'
+        ? `${event.id}|${date}`
+        : `${event.space_id}|${event.title}|${date}`;
       const existing = byKey.get(key);
       if (!existing) {
         byKey.set(key, { key, date, event, distance, mention_count: 1 });
@@ -1529,6 +1551,8 @@ export async function listEventsNearby(query: EventQuery): Promise<CalendarOccur
     query.center.latitude.toFixed(3),
     query.center.longitude.toFixed(3),
     query.radiusMiles,
+    query.viewerId || 'anon',
+    query.includePrivate ? 'private' : 'public',
   ].join('|');
 
   const cached = eventCache.get(cacheKey);
@@ -1537,11 +1561,575 @@ export async function listEventsNearby(query: EventQuery): Promise<CalendarOccur
   const localEvents = getLocalEvents();
   const remoteEvents = await fetchRemoteEvents(query);
   const remoteIds = new Set((remoteEvents || []).map((event) => event.id));
-  const events = remoteEvents
-    ? [...remoteEvents, ...localEvents.filter((event) => !remoteIds.has(event.id))]
-    : localEvents;
+  const hosted = remoteEvents ? [] : getLocalHosted(query.viewerId);
+  const withRsvps = remoteEvents ? await attachRemoteRsvps(remoteEvents, query.viewerId) : [];
+  const events = (remoteEvents
+    ? [...withRsvps, ...localEvents.filter((event) => !remoteIds.has(event.id))]
+    : [...localEvents, ...hosted]
+  ).filter((event) => canShowInLists(event, query.viewerId, Boolean(query.includePrivate)));
 
   const occurrences = buildOccurrences(events, query);
   eventCache.set(cacheKey, occurrences);
   return occurrences;
+}
+
+const DEMO_COFFEE_EVENT = 'hosted-demo-coffee';
+const DEMO_PRIVATE_EVENT = 'hosted-demo-game';
+const DEMO_PICKUP_EVENT = 'hosted-demo-pickup';
+
+const createUuid = () => globalThis.crypto?.randomUUID?.() ?? 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (char) => {
+  const random = Math.floor(Math.random() * 16);
+  const value = char === 'x' ? random : (random & 0x3) | 0x8;
+  return value.toString(16);
+});
+
+const createToken = () => Array.from({ length: 24 }, () => Math.floor(Math.random() * 16).toString(16)).join('');
+
+const daysFromToday = (days: number) => {
+  const date = new Date();
+  date.setDate(date.getDate() + days);
+  return toDateKey(date);
+};
+
+const clipText = (value: string, max: number) => (value.length > max ? `${value.slice(0, max - 1).trimEnd()}…` : value);
+
+const EVENT_THEME_IDS: EventTheme[] = ['indigo', 'sunset', 'night', 'court', 'cafe', 'grove'];
+const isEventTheme = (value: unknown): value is EventTheme =>
+  typeof value === 'string' && EVENT_THEME_IDS.includes(value as EventTheme);
+
+const namesMatch = (left: string, right: string) => {
+  const a = left.trim().toLowerCase();
+  const b = right.trim().toLowerCase();
+  return Boolean(a && b && (a === b || a.includes(b) || b.includes(a)));
+};
+
+const canShowInLists = (event: SpaceEvent, viewerId: string | undefined, includePrivate: boolean, allowSecretSpace = false) => {
+  if (event.cancelled_at) return false;
+  if (event.space.is_secret && event.visibility !== 'private' && !allowSecretSpace) return false;
+  if (event.visibility !== 'private') return true;
+  if (!includePrivate) return false;
+  return event.host_user_id === viewerId || Boolean(event.viewer_rsvp) || event.going.some((person) => person.user_id === viewerId);
+};
+
+const canReadEvent = (event: SpaceEvent, viewerId: string | undefined, token?: string) => {
+  if (event.cancelled_at && event.host_user_id !== viewerId) return false;
+  if (event.visibility !== 'private') return !event.space.is_secret || event.host_user_id === viewerId || Boolean(event.viewer_rsvp);
+  return event.host_user_id === viewerId
+    || Boolean(event.viewer_rsvp)
+    || Boolean(token && event.invite_token && token === event.invite_token);
+};
+
+function hydrateHosted(event: SpaceEvent, viewerId?: string): SpaceEvent {
+  const rsvps = localState.rsvps.filter((rsvp) => rsvp.event_id === event.id);
+  const goingIds = rsvps.filter((rsvp) => rsvp.status === 'going').map((rsvp) => rsvp.user_id);
+  const going = goingIds
+    .map((userId) => findLocalProfile(userId))
+    .filter((profile): profile is Profile => Boolean(profile));
+  const viewerRsvp = viewerId ? rsvps.find((rsvp) => rsvp.user_id === viewerId)?.status : undefined;
+  return {
+    ...event,
+    going,
+    going_count: goingIds.length,
+    viewer_going: viewerRsvp === 'going',
+    viewer_rsvp: viewerRsvp,
+    profile: event.profile || findLocalProfile(event.host_user_id),
+  };
+}
+
+function seedDemoHosted() {
+  if (localState.hostedEvents) return;
+  const timestamp = toIso();
+  const cafe = localState.spaces.find((space) => space.id === '00000000-0000-0000-0000-000000000101');
+  const board = localState.spaces.find((space) => space.id === '00000000-0000-0000-0000-000000000104');
+  const court = localState.spaces.find((space) => space.category === 'Sports Area' && !space.is_secret);
+  const mike = findLocalProfile('user-mike');
+  const sarah = findLocalProfile(demoCurrentUserId);
+  const events: SpaceEvent[] = [];
+
+  if (cafe && mike) {
+    events.push({
+      id: DEMO_COFFEE_EVENT,
+      space_id: cafe.id,
+      source_type: 'hosted',
+      source_id: DEMO_COFFEE_EVENT,
+      source_user_id: mike.user_id,
+      host_user_id: mike.user_id,
+      visibility: 'public',
+      theme: 'cafe',
+      title: 'After-work coffee hang',
+      kind: 'one_time',
+      event_date: daysFromToday(2),
+      start_time: '18:00',
+      snippet: 'Laptops optional. We will grab the big table upstairs.',
+      description: 'Laptops optional. We will grab the big table upstairs.',
+      invite_token: 'demo-coffee-hang',
+      allow_over_capacity: false,
+      source_created_at: timestamp,
+      created_at: timestamp,
+      space: cafe,
+      profile: mike,
+      going_count: 0,
+      going: [],
+      viewer_going: false,
+    });
+    localState.rsvps.push(
+      { event_id: DEMO_COFFEE_EVENT, user_id: demoCurrentUserId, status: 'going', created_at: timestamp },
+      { event_id: DEMO_COFFEE_EVENT, user_id: 'user-emma', status: 'going', created_at: timestamp }
+    );
+  }
+
+  if (court && sarah) {
+    events.push({
+      id: DEMO_PICKUP_EVENT,
+      space_id: court.id,
+      source_type: 'hosted',
+      source_id: DEMO_PICKUP_EVENT,
+      source_user_id: sarah.user_id,
+      host_user_id: sarah.user_id,
+      visibility: 'private',
+      theme: 'court',
+      title: 'Pickup basketball',
+      kind: 'one_time',
+      event_date: daysFromToday(3),
+      start_time: '17:00',
+      snippet: 'Full court 5v5. Bring a dark and a light shirt.',
+      description: 'Full court 5v5. Bring a dark and a light shirt.',
+      capacity: 10,
+      allow_over_capacity: false,
+      invite_token: 'demo-pickup-hoops',
+      source_created_at: timestamp,
+      created_at: timestamp,
+      space: court,
+      profile: sarah,
+      going_count: 0,
+      going: [],
+      viewer_going: false,
+    });
+    localState.rsvps.push(
+      { event_id: DEMO_PICKUP_EVENT, user_id: 'user-mike', status: 'going', created_at: timestamp },
+      { event_id: DEMO_PICKUP_EVENT, user_id: 'user-nina', status: 'going', created_at: timestamp },
+      { event_id: DEMO_PICKUP_EVENT, user_id: 'user-emma', status: 'not_going', created_at: timestamp }
+    );
+  }
+
+  if (board && sarah) {
+    events.push({
+      id: DEMO_PRIVATE_EVENT,
+      space_id: board.id,
+      source_type: 'hosted',
+      source_id: DEMO_PRIVATE_EVENT,
+      source_user_id: sarah.user_id,
+      host_user_id: sarah.user_id,
+      visibility: 'private',
+      theme: 'night',
+      title: 'Friends-only game night',
+      kind: 'one_time',
+      event_date: daysFromToday(6),
+      start_time: '19:30',
+      snippet: 'Just us. Bring a game if you have one.',
+      description: 'Just us. Bring a game if you have one.',
+      invite_token: 'demo-private-game-night',
+      allow_over_capacity: false,
+      source_created_at: timestamp,
+      created_at: timestamp,
+      space: board,
+      profile: sarah,
+      going_count: 0,
+      going: [],
+      viewer_going: false,
+    });
+  }
+
+  localState.hostedEvents = events;
+}
+
+function getLocalHosted(viewerId?: string) {
+  seedDemoHosted();
+  return (localState.hostedEvents || []).map((event) => hydrateHosted(event, viewerId));
+}
+
+function mapStoredEventRow(row: Record<string, unknown>): StoredEventRow {
+  return {
+    id: String(row.id),
+    space_id: String(row.space_id),
+    source_type: row.source_type as EventSourceType,
+    source_id: String(row.source_id),
+    source_user_id: (row.source_user_id as string | null) || undefined,
+    host_user_id: (row.host_user_id as string | null) || undefined,
+    visibility: row.visibility === 'private' ? 'private' : 'public',
+    theme: isEventTheme(row.theme) ? row.theme : 'indigo',
+    title: String(row.title),
+    kind: row.kind as EventKind,
+    event_date: (row.event_date as string | null) ?? null,
+    weekday: row.weekday === null || row.weekday === undefined ? null : Number(row.weekday),
+    start_time: (row.start_time as string | null) ?? null,
+    link_url: (row.link_url as string | null) ?? null,
+    snippet: String(row.snippet || row.title || ''),
+    description: (row.description as string | null) ?? null,
+    capacity: row.capacity === null || row.capacity === undefined ? null : Number(row.capacity),
+    allow_over_capacity: Boolean(row.allow_over_capacity),
+    invite_token: (row.invite_token as string | null) ?? null,
+    cancelled_at: (row.cancelled_at as string | null) ?? null,
+    source_created_at: String(row.source_created_at),
+    created_at: String(row.created_at),
+  };
+}
+
+function profileFromPayload(row: Record<string, unknown> | null | undefined): Profile | undefined {
+  if (!row?.user_id) return undefined;
+  return {
+    id: String(row.id || row.user_id),
+    user_id: String(row.user_id),
+    username: (row.username as string | null) || undefined,
+    full_name: (row.full_name as string | null) || undefined,
+    avatar_url: (row.avatar_url as string | null) || undefined,
+    bio: (row.bio as string | null) || undefined,
+    location: (row.location as string | null) || undefined,
+    vibe_title: (row.vibe_title as string | null) || undefined,
+    created_at: String(row.created_at || ''),
+    updated_at: String(row.updated_at || ''),
+  };
+}
+
+async function attachRemoteRsvps(events: SpaceEvent[], viewerId?: string): Promise<SpaceEvent[]> {
+  const ids = events.map((event) => event.id).filter(isUuid);
+  if (!supabase || ids.length === 0) return events;
+
+  const { data, error } = await supabase.from('event_rsvps').select('event_id, user_id, status').in('event_id', ids);
+  if (error) {
+    console.warn('Could not load RSVPs:', error.message);
+    return events;
+  }
+
+  const allRows = (data || []) as { event_id: string; user_id: string; status: RsvpStatus }[];
+  const rows = allRows.filter((row) => row.status === 'going');
+  const viewerStatus = new Map(allRows.filter((row) => row.user_id === viewerId).map((row) => [row.event_id, row.status]));
+  const profiles = await fetchProfilesByUserId(rows.map((row) => row.user_id));
+  const byEvent = new Map<string, Profile[]>();
+  rows.forEach((row) => {
+    const list = byEvent.get(row.event_id) || [];
+    list.push(profiles[row.user_id] || {
+      id: row.user_id,
+      user_id: row.user_id,
+      created_at: '',
+      updated_at: '',
+    });
+    byEvent.set(row.event_id, list);
+  });
+
+  return events.map((event) => {
+    const going = byEvent.get(event.id) || event.going;
+    const viewerRsvp = viewerStatus.get(event.id);
+    return {
+      ...event,
+      going,
+      going_count: going.length,
+      viewer_going: viewerRsvp === 'going',
+      viewer_rsvp: viewerRsvp,
+    };
+  });
+}
+
+function mapFetchedEvent(payload: Record<string, unknown>, viewerId?: string): SpaceEvent | null {
+  const eventRow = payload.event as Record<string, unknown> | undefined;
+  const spaceRow = payload.space as Record<string, unknown> | undefined;
+  if (!eventRow || !spaceRow) return null;
+  const going = Array.isArray(payload.going)
+    ? payload.going.map((row) => profileFromPayload(row as Record<string, unknown>)).filter((profile): profile is Profile => Boolean(profile))
+    : [];
+  const event = rowToSpaceEvent(mapStoredEventRow(eventRow), mapSpaceRow(spaceRow), profileFromPayload(payload.host as Record<string, unknown> | undefined));
+  const viewerRsvp = payload.viewer_status === 'going' || payload.viewer_status === 'not_going'
+    ? payload.viewer_status as RsvpStatus
+    : undefined;
+  return {
+    ...event,
+    going,
+    going_count: going.length,
+    viewer_going: viewerRsvp === 'going' || Boolean(viewerId && going.some((person) => person.user_id === viewerId)),
+    viewer_rsvp: viewerRsvp,
+  };
+}
+
+function matchKnownSpace(
+  spaces: SpaceWithAttributes[],
+  candidate: { name: string; latitude: number; longitude: number }
+) {
+  let best: { space: SpaceWithAttributes; distance: number } | undefined;
+  spaces.forEach((space) => {
+    if (space.is_secret) return;
+    const distance = calculateDistanceMiles(candidate, space);
+    if (distance > 0.05) return;
+    if (!namesMatch(space.name, candidate.name) && distance > 0.02) return;
+    if (!best || distance < best.distance) best = { space, distance };
+  });
+  return best?.space;
+}
+
+async function resolveEventSpace(userId: string, input: CreateHostedEventInput): Promise<SpaceWithAttributes> {
+  const purpose = input.space.primary_purpose || CATEGORY_CONFIG[input.space.category].purposes[0];
+
+  if (input.existingSpace) {
+    if (!canUseUserScopedRemote(userId)) {
+      const known = localState.spaces.find((space) => space.id === input.space.id);
+      if (!known) throw new Error('Pick a place first');
+      return known;
+    }
+    const { data, error } = await supabase.from('spaces').select('*').eq('id', input.space.id).maybeSingle();
+    if (error || !data) throw new Error('That place is not available');
+    return mapSpaceRow(data as Record<string, unknown>);
+  }
+
+  if (!canUseUserScopedRemote(userId)) {
+    const nearby = matchKnownSpace(localState.spaces, input.space);
+    if (nearby) return nearby;
+    const timestamp = toIso();
+    const space: SpaceWithAttributes = {
+      id: createId('space'),
+      name: input.space.name.trim(),
+      category: input.space.category,
+      primary_purpose: purpose,
+      address: input.space.address,
+      latitude: input.space.latitude,
+      longitude: input.space.longitude,
+      is_secret: false,
+      created_by: userId,
+      created_at: timestamp,
+      updated_at: timestamp,
+    };
+    localState.spaces.push(space);
+    return space;
+  }
+
+  const delta = 0.05 / MILES_PER_DEGREE_LATITUDE;
+  const { data: nearbyRows } = await supabase
+    .from('spaces')
+    .select('*')
+    .gte('latitude', input.space.latitude - delta)
+    .lte('latitude', input.space.latitude + delta)
+    .gte('longitude', input.space.longitude - delta)
+    .lte('longitude', input.space.longitude + delta)
+    .limit(20);
+  const nearby = matchKnownSpace(((nearbyRows || []) as Record<string, unknown>[]).map(mapSpaceRow), input.space);
+  if (nearby) return nearby;
+
+  const timestamp = toIso();
+  const { data, error } = await supabase.from('spaces').insert({
+    name: input.space.name.trim(),
+    category: input.space.category,
+    primary_purpose: purpose,
+    address: input.space.address,
+    latitude: input.space.latitude,
+    longitude: input.space.longitude,
+    is_secret: false,
+    created_by: userId,
+    updated_at: timestamp,
+  }).select().single();
+  if (error) throw error;
+  return mapSpaceRow(data as Record<string, unknown>);
+}
+
+export async function createHostedEvent(userId: string, input: CreateHostedEventInput): Promise<SpaceEvent> {
+  const title = input.title.trim();
+  const description = input.description?.trim();
+  if (!title || title.length > 60) throw new Error('Give it a title, up to 60 characters.');
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(input.eventDate)) throw new Error('Pick a date.');
+  if (!/^\d{2}:\d{2}$/.test(input.startTime)) throw new Error('Pick a start time.');
+  if (description && description.length > 800) throw new Error('Keep the note under 800 characters.');
+  if (input.capacity !== undefined && (!Number.isInteger(input.capacity) || input.capacity < 1 || input.capacity > 500)) {
+    throw new Error('Capacity has to be between 1 and 500.');
+  }
+  if (isSupabaseConfigured && supabase && !isUuid(userId)) throw new Error('Sign in to host an event');
+
+  const space = await resolveEventSpace(userId, input);
+  if (space.is_secret && input.visibility === 'public') throw new Error('Public hangouts have to be at a public spot.');
+
+  const id = createUuid();
+  const token = createToken();
+  const timestamp = toIso();
+  const snippet = clipText(description || `Hosted at ${space.name}`, 220);
+  const profile = findLocalProfile(userId);
+  const event: SpaceEvent = {
+    id,
+    space_id: space.id,
+    source_type: 'hosted',
+    source_id: id,
+    source_user_id: userId,
+    host_user_id: userId,
+    visibility: input.visibility,
+    theme: isEventTheme(input.theme) ? input.theme : 'indigo',
+    title,
+    kind: 'one_time',
+    event_date: input.eventDate,
+    start_time: input.startTime,
+    link_url: input.linkUrl,
+    snippet,
+    description,
+    capacity: input.capacity,
+    allow_over_capacity: Boolean(input.capacity && input.allowOverCapacity),
+    invite_token: token,
+    source_created_at: timestamp,
+    created_at: timestamp,
+    space,
+    profile,
+    going_count: 0,
+    going: [],
+    viewer_going: false,
+  };
+
+  if (!canUseUserScopedRemote(userId)) {
+    seedDemoHosted();
+    localState.hostedEvents?.push(event);
+    eventCache.clear();
+    return hydrateHosted(event, userId);
+  }
+
+  const { error } = await supabase.from('space_events').insert({
+    id,
+    space_id: space.id,
+    source_type: 'hosted',
+    source_id: id,
+    source_user_id: userId,
+    host_user_id: userId,
+    visibility: input.visibility,
+    theme: isEventTheme(input.theme) ? input.theme : 'indigo',
+    title,
+    kind: 'one_time',
+    event_date: input.eventDate,
+    weekday: null,
+    start_time: input.startTime,
+    link_url: input.linkUrl ?? null,
+    snippet,
+    description: description ?? null,
+    capacity: input.capacity ?? null,
+    allow_over_capacity: Boolean(input.capacity && input.allowOverCapacity),
+    invite_token: token,
+    dedupe_key: id,
+    source_created_at: timestamp,
+  });
+  if (error) throw new Error(error.message);
+  eventCache.clear();
+  return (await getEvent(id, userId, token)) || event;
+}
+
+export async function updateHostedEventTheme(userId: string, eventId: string, theme: EventTheme): Promise<void> {
+  if (!isEventTheme(theme)) throw new Error('Pick a look from the list.');
+  if (!canUseUserScopedRemote(userId)) {
+    seedDemoHosted();
+    const event = localState.hostedEvents?.find((item) => item.id === eventId);
+    if (!event || event.host_user_id !== userId) throw new Error('Only the host can change the look');
+    event.theme = theme;
+    eventCache.clear();
+    return;
+  }
+
+  const { error } = await supabase
+    .from('space_events')
+    .update({ theme })
+    .eq('id', eventId)
+    .eq('host_user_id', userId)
+    .eq('source_type', 'hosted');
+  if (error) throw new Error(error.message);
+  eventCache.clear();
+}
+
+export async function getEvent(eventId: string, viewerId?: string, token?: string): Promise<SpaceEvent | null> {
+  if (!isSupabaseConfigured || !supabase || !isUuid(eventId)) {
+    const hosted = getLocalHosted(viewerId).find((event) => event.id === eventId);
+    if (hosted) return canReadEvent(hosted, viewerId, token) ? hosted : null;
+    return getLocalEvents().find((event) => event.id === eventId) || null;
+  }
+
+  const { data, error } = await supabase.rpc('fetch_event', { target_id: eventId, token: token || null });
+  if (!error && data) return mapFetchedEvent(data as Record<string, unknown>, viewerId);
+  if (error) console.warn('fetch_event failed, trying a direct read:', error.message);
+
+  const { data: row, error: readError } = await supabase
+    .from('space_events')
+    .select('*, spaces!inner(*)')
+    .eq('id', eventId)
+    .maybeSingle();
+  if (readError || !row) return null;
+  const stored = mapStoredEventRow(row as Record<string, unknown>);
+  const hostId = stored.host_user_id || stored.source_user_id;
+  const profiles = hostId ? await fetchProfilesByUserId([hostId]) : {};
+  const [event] = await attachRemoteRsvps([
+    rowToSpaceEvent(stored, mapSpaceRow((row as Record<string, unknown>).spaces as Record<string, unknown>), hostId ? profiles[hostId] : undefined),
+  ], viewerId);
+  return event;
+}
+
+export async function setEventRsvp(userId: string, eventId: string, status: RsvpStatus | null, token?: string): Promise<void> {
+  if (isSupabaseConfigured && supabase && !isUuid(userId)) throw new Error('Sign in to RSVP');
+
+  if (!canUseUserScopedRemote(userId)) {
+    const event = getLocalHosted(userId).find((item) => item.id === eventId);
+    if (!event || event.source_type !== 'hosted' || event.cancelled_at) throw new Error('Event not found');
+    if (!canReadEvent(event, userId, token)) throw new Error('You need an invite to RSVP');
+    const others = localState.rsvps.filter((rsvp) => !(rsvp.event_id === eventId && rsvp.user_id === userId));
+    if (status === 'going' && event.capacity && !event.allow_over_capacity) {
+      const count = others.filter((rsvp) => rsvp.event_id === eventId && rsvp.status === 'going').length;
+      if (count >= event.capacity) throw new Error('This event is full');
+    }
+    localState.rsvps = status
+      ? [...others, { event_id: eventId, user_id: userId, status, created_at: toIso() }]
+      : others;
+    eventCache.clear();
+    return;
+  }
+
+  const { error } = await supabase.rpc('set_event_rsvp', { target_id: eventId, rsvp_status: status, token: token || null });
+  if (error) throw new Error(error.message);
+  eventCache.clear();
+}
+
+export async function cancelHostedEvent(userId: string, eventId: string): Promise<void> {
+  if (!canUseUserScopedRemote(userId)) {
+    seedDemoHosted();
+    const event = localState.hostedEvents?.find((item) => item.id === eventId);
+    if (!event || event.host_user_id !== userId) throw new Error('Only the host can cancel this');
+    event.cancelled_at = toIso();
+    eventCache.clear();
+    return;
+  }
+
+  const { error } = await supabase
+    .from('space_events')
+    .update({ cancelled_at: toIso() })
+    .eq('id', eventId)
+    .eq('host_user_id', userId)
+    .eq('source_type', 'hosted');
+  if (error) throw new Error(error.message);
+  eventCache.clear();
+}
+
+export async function listSpaceEvents(spaceId: string, viewerId?: string): Promise<SpaceEvent[]> {
+  const today = toDateKey(new Date());
+  const localHosted = isSupabaseConfigured && supabase ? [] : getLocalHosted(viewerId).filter((event) => event.space_id === spaceId);
+  let remote: SpaceEvent[] = [];
+
+  if (isSupabaseConfigured && supabase) {
+    const { data, error } = await supabase.from('space_events').select('*, spaces!inner(*)').eq('space_id', spaceId).limit(100);
+    if (!error && data) {
+      const profiles = await fetchProfilesByUserId(
+        (data as Record<string, unknown>[]).flatMap((row) => [row.host_user_id, row.source_user_id]).filter(Boolean).map(String)
+      );
+      const mapped = (data as Record<string, unknown>[]).map((row) => {
+        const hostId = (row.host_user_id as string | null) || (row.source_user_id as string | null);
+        return rowToSpaceEvent(mapStoredEventRow(row), mapSpaceRow(row.spaces as Record<string, unknown>), hostId ? profiles[hostId] : undefined);
+      });
+      remote = await attachRemoteRsvps(mapped, viewerId);
+    }
+  }
+
+  const seen = new Set<string>();
+  return [...remote, ...getLocalEvents().filter((event) => event.space_id === spaceId), ...localHosted]
+    .filter((event) => {
+      const signature = `${event.source_type}|${event.title}|${event.event_date ?? ''}|${event.weekday ?? ''}`;
+      if (seen.has(signature) || !canShowInLists(event, viewerId, true, true)) return false;
+      if (event.kind === 'one_time' && event.event_date && event.event_date < today) return false;
+      seen.add(signature);
+      return true;
+    })
+    .sort((first, second) => (first.event_date || '9999').localeCompare(second.event_date || '9999')
+      || (first.start_time || '99:99').localeCompare(second.start_time || '99:99'));
 }

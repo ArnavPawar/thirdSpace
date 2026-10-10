@@ -497,7 +497,9 @@ export interface RatingHistoryEntry {
 }
 
 export type EventKind = 'one_time' | 'weekly';
-export type EventSourceType = 'rating' | 'space';
+export type EventSourceType = 'rating' | 'space' | 'hosted';
+export type EventVisibility = 'public' | 'private';
+export type EventTheme = 'indigo' | 'sunset' | 'night' | 'court' | 'cafe' | 'grove';
 
 export interface SpaceEvent {
   id: string;
@@ -505,6 +507,9 @@ export interface SpaceEvent {
   source_type: EventSourceType;
   source_id: string;
   source_user_id?: string;
+  host_user_id?: string;
+  visibility: EventVisibility;
+  theme: EventTheme;
   title: string;
   kind: EventKind;
   event_date?: string; // YYYY-MM-DD, one_time only
@@ -512,10 +517,37 @@ export interface SpaceEvent {
   start_time?: string; // HH:MM, 24h
   link_url?: string;
   snippet: string;
+  description?: string;
+  capacity?: number;
+  allow_over_capacity: boolean;
+  invite_token?: string;
+  cancelled_at?: string;
   source_created_at: string;
   created_at: string;
   space: SpaceWithAttributes;
   profile?: Profile;
+  going_count: number;
+  going: Profile[];
+  viewer_going: boolean;
+  viewer_rsvp?: RsvpStatus;
+}
+
+export type RsvpStatus = 'going' | 'not_going';
+
+export interface CreateHostedEventInput {
+  title: string;
+  eventDate: string;
+  startTime: string;
+  visibility: EventVisibility;
+  theme?: EventTheme;
+  description?: string;
+  capacity?: number;
+  allowOverCapacity?: boolean;
+  linkUrl?: string;
+  existingSpace: boolean;
+  space: Pick<ThirdSpace, 'id' | 'name' | 'category' | 'address' | 'latitude' | 'longitude'> & {
+    primary_purpose?: CategoryPurpose;
+  };
 }
 
 export interface CalendarOccurrence {

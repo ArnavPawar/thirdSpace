@@ -1,4 +1,4 @@
-import type { EventKind, EventSourceType } from '@/types/space';
+import type { CalendarOccurrence, EventKind, EventSourceType, SpaceEvent } from '@/types/space';
 
 export interface ExtractedEvent {
   title: string;
@@ -346,4 +346,50 @@ export function formatEventTime(time?: string): string | undefined {
   const suffix = hour >= 12 ? 'PM' : 'AM';
   const displayHour = hour % 12 || 12;
   return minute ? `${displayHour}:${pad(minute)} ${suffix}` : `${displayHour} ${suffix}`;
+}
+
+export function parseEventTime(value: string): string | undefined {
+  const trimmed = value.trim().toLowerCase();
+  const twentyFour = trimmed.match(/^([01]?\d|2[0-3]):([0-5]\d)$/);
+  if (twentyFour) return `${twentyFour[1].padStart(2, '0')}:${twentyFour[2]}`;
+
+  const meridiem = trimmed.match(/^(\d{1,2})(?::([0-5]\d))?\s*([ap])\.?m\.?$/);
+  if (!meridiem) return undefined;
+  let hour = Number(meridiem[1]);
+  const minute = meridiem[2] || '00';
+  if (hour < 1 || hour > 12) return undefined;
+  if (hour === 12) hour = meridiem[3] === 'p' ? 12 : 0;
+  else if (meridiem[3] === 'p') hour += 12;
+  return `${pad(hour)}:${minute}`;
+}
+
+export function formatEventWhen(
+  event: { kind: EventKind; event_date?: string; weekday?: number; start_time?: string },
+  occurrenceDate?: string
+) {
+  const time = formatEventTime(event.start_time);
+  if (event.kind === 'weekly') {
+    const day = WEEKDAY_NAMES[event.weekday ?? (occurrenceDate ? parseDateKey(occurrenceDate).getDay() : 0)];
+    return [`Every ${day}`, time].filter(Boolean).join(' · ');
+  }
+
+  const dateKey = occurrenceDate || event.event_date;
+  const label = dateKey
+    ? parseDateKey(dateKey).toLocaleDateString(undefined, { weekday: 'long', month: 'long', day: 'numeric' })
+    : 'Date TBD';
+  return [label, time].filter(Boolean).join(' · ');
+}
+
+export function isHostedEvent(event: { source_type: string }) {
+  return event.source_type === 'hosted';
+}
+
+export function upcomingEventsBySpace(occurrences: CalendarOccurrence[], today = toDateKey(new Date())) {
+  const bySpace = new Map<string, SpaceEvent[]>();
+  occurrences.filter((occurrence) => occurrence.date >= today).forEach((occurrence) => {
+    const list = bySpace.get(occurrence.event.space_id) ?? [];
+    if (!list.some((event) => event.id === occurrence.event.id)) list.push(occurrence.event);
+    bySpace.set(occurrence.event.space_id, list);
+  });
+  return bySpace;
 }
