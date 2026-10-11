@@ -1,3 +1,4 @@
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { createClient } from '@supabase/supabase-js';
 
 export type Json = string | number | boolean | null | { [key: string]: Json | undefined } | Json[];
@@ -150,12 +151,18 @@ export const isSupabaseConfigured = Boolean(
 // Expo's web pre-render runs in Node, which lacks WebSocket before v22 and makes Supabase realtime throw.
 const canCreateClient = isSupabaseConfigured && typeof globalThis.WebSocket !== 'undefined';
 
+// Keep the session on device. A memory-only session disappears on reload, which looks like a failed login.
+const canPersistAuth =
+  (typeof navigator !== 'undefined' && navigator.product === 'ReactNative') ||
+  (typeof window !== 'undefined' && typeof window.localStorage !== 'undefined');
+
 export const supabase: any = canCreateClient
   ? createClient<Database>(supabaseUrl!, supabaseAnonKey!, {
       auth: {
-        autoRefreshToken: true,
+        ...(canPersistAuth
+          ? { storage: AsyncStorage, autoRefreshToken: true, persistSession: true }
+          : { autoRefreshToken: false, persistSession: false }),
         detectSessionInUrl: false,
-        persistSession: false,
       },
     })
   : null;

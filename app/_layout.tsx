@@ -26,6 +26,17 @@ export default function RootLayout() {
           }}
         />
         <Stack.Screen
+          name="auth/reset"
+          options={{
+            headerShown: true,
+            title: 'Reset password',
+            headerBackTitle: 'Back',
+            headerShadowVisible: false,
+            headerTintColor: colors.ink,
+            headerStyle: { backgroundColor: colors.background },
+          }}
+        />
+        <Stack.Screen
           name="space/[id]"
           options={{
             headerShown: true,
