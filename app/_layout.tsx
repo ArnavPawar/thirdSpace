@@ -60,6 +60,17 @@ export default function RootLayout() {
           }}
         />
         <Stack.Screen
+          name="event/chat/[id]"
+          options={{
+            headerShown: true,
+            title: 'Group chat',
+            headerBackTitle: 'Back',
+            headerShadowVisible: false,
+            headerTintColor: colors.ink,
+            headerStyle: { backgroundColor: colors.background },
+          }}
+        />
+        <Stack.Screen
           name="user/[id]"
           options={{
             headerShown: true,

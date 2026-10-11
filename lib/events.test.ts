@@ -1,4 +1,17 @@
-import { expandEventDates, extractEvents, findLink, findStartTime, formatEventTime } from './events';
+import {
+  expandEventDates,
+  extractEvents,
+  findLink,
+  findStartTime,
+  formatEventTime,
+  getEventPhase,
+  eventOrigin,
+  isChatOpen,
+  nextOccurrenceAfter,
+  nextOccurrenceDate,
+  resolveOccurrenceDate,
+  seriesKey,
+} from './events';
 
 function assert(condition: unknown, message: string) {
   if (!condition) {
@@ -77,5 +90,52 @@ assert(oneTime.length === 1 && expandEventDates(
   { kind: 'one_time', event_date: '2026-11-02', source_created_at: reference.toISOString() },
   new Date(2026, 9, 1)
 ).length === 0, 'one-time events only appear in their month');
+
+const tuesdayTrivia = { kind: 'weekly' as const, weekday: 2 };
+assert(nextOccurrenceDate(tuesdayTrivia, reference) === '2026-10-06', 'next Tuesday after a Thursday');
+assert(nextOccurrenceDate(tuesdayTrivia, new Date(2026, 9, 6, 23)) === '2026-10-06', 'today counts as the next occurrence');
+assert(resolveOccurrenceDate(tuesdayTrivia, '2026-10-13', reference) === '2026-10-13', 'keeps a requested Tuesday');
+assert(resolveOccurrenceDate(tuesdayTrivia, '2026-10-14', reference) === '2026-10-06', 'ignores a requested date on the wrong weekday');
+assert(
+  resolveOccurrenceDate({ kind: 'one_time', event_date: '2026-10-17' }, '2026-10-20', reference) === '2026-10-17',
+  'one-time events always use their own date'
+);
+
+const eightPm = { start_time: '20:00' };
+assert(getEventPhase(eightPm, '2026-10-06', new Date(2026, 9, 6, 19, 0)) === 'upcoming', 'an hour early is upcoming');
+assert(getEventPhase(eightPm, '2026-10-06', new Date(2026, 9, 6, 19, 45)) === 'live', 'live 30 minutes before start');
+assert(getEventPhase(eightPm, '2026-10-06', new Date(2026, 9, 6, 23, 30)) === 'live', 'still live a few hours in');
+assert(getEventPhase(eightPm, '2026-10-06', new Date(2026, 9, 7, 0, 30)) === 'ended', 'ends four hours after start');
+assert(getEventPhase({}, '2026-10-06', new Date(2026, 9, 6, 9)) === 'live', 'no start time means live all day');
+assert(getEventPhase({}, '2026-10-06', new Date(2026, 9, 7, 0, 1)) === 'ended', 'no start time ends at midnight');
+
+assert(isChatOpen('2026-10-06', new Date(2026, 9, 7, 22)), 'chat stays open the day after');
+assert(!isChatOpen('2026-10-06', new Date(2026, 9, 8, 0, 1)), 'chat closes two days later');
+
+assert(nextOccurrenceAfter(tuesdayTrivia, '2026-10-06', new Date(2026, 9, 6, 23)) === '2026-10-13', 'next week after tonight');
+assert(nextOccurrenceAfter(tuesdayTrivia, '2026-09-01', reference) === '2026-10-06', 'skips to upcoming for an old date');
+assert(nextOccurrenceAfter({ kind: 'one_time', event_date: '2026-10-06' }, '2026-10-06') === undefined, 'one-time has no next');
+
+// Different wordings in different reviews should land in the same series.
+const triviaWordings = [
+  'Trivia every Tuesday at 8pm and the hosts are hilarious.',
+  'Came for trivia night, they run it every Tuesday. Our team came in third.',
+  'Trivia on Tuesdays at 8pm is the move. Sign your team up at theboardroomva.com/trivia so you get a table.',
+].map((text) => extractEvents(text, reference)[0]);
+assert(triviaWordings.every((event) => event?.kind === 'weekly' && event.weekday === 2), 'all trivia wordings are weekly Tuesdays');
+const triviaKeys = new Set(triviaWordings.map((event) => seriesKey({ space_id: 'board-room', title: event.title })));
+assert(triviaKeys.size === 1, 'all trivia wordings share one series');
+assert(
+  seriesKey({ space_id: 'a', title: 'Trivia Night' }) !== seriesKey({ space_id: 'b', title: 'Trivia Night' }),
+  'same title at different spots is a different series'
+);
+const runClub = extractEvents('Joined the run club Thursday nights. Easy pace groups.', reference)[0];
+assert(runClub?.title === 'Run Club' && runClub.weekday === 4, '"Thursday nights" run club joins the Thursday series');
+
+assert(eventOrigin({ source_type: 'review' }) === 'reviews', 'review mentions are reviews');
+assert(eventOrigin({ source_type: 'space' }) === 'reviews', 'place descriptions group with reviews');
+assert(eventOrigin({ source_type: 'hosted', visibility: 'public' }) === 'public', 'public hangout');
+assert(eventOrigin({ source_type: 'hosted', visibility: 'private' }) === 'private', 'private invite');
+assert(eventOrigin({ source_type: 'hosted' }) === 'public', 'hosted without visibility is public');
 
 console.log('events tests passed');

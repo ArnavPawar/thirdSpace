@@ -507,6 +507,10 @@ export interface SpaceEvent {
   source_type: EventSourceType;
   source_id: string;
   source_user_id?: string;
+  /** Shared by every mention of the same event at the same spot. Hosted events are their own series. */
+  series_id?: string;
+  /** How many reviews mention this event, when known. */
+  mention_count?: number;
   host_user_id?: string;
   visibility: EventVisibility;
   theme: EventTheme;
@@ -526,13 +530,44 @@ export interface SpaceEvent {
   created_at: string;
   space: SpaceWithAttributes;
   profile?: Profile;
+  /** The date the going/here headcounts below belong to. Weekly events have one per week. */
+  occurrence_date?: string;
   going_count: number;
   going: Profile[];
   viewer_going: boolean;
   viewer_rsvp?: RsvpStatus;
+  here_count: number;
+  here: Profile[];
+  viewer_here: boolean;
 }
 
 export type RsvpStatus = 'going' | 'not_going';
+
+/** One review or place description that mentions an event. */
+export interface EventMention {
+  id: string;
+  source_type: EventSourceType;
+  snippet: string;
+  kind: EventKind;
+  event_date?: string;
+  weekday?: number;
+  start_time?: string;
+  link_url?: string;
+  source_created_at: string;
+  profile?: Profile;
+}
+
+export interface EventMessage {
+  id: string;
+  event_id: string;
+  occurrence_date: string;
+  user_id: string;
+  body: string;
+  created_at: string;
+  profile?: Profile;
+}
+
+export const MAX_EVENT_MESSAGE_LENGTH = 1000;
 
 export interface CreateHostedEventInput {
   title: string;

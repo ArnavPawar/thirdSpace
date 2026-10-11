@@ -4,7 +4,7 @@ import * as WebBrowser from 'expo-web-browser';
 import { Clock, ExternalLink, MapPin, Repeat, Users } from 'lucide-react-native';
 import GoingFaces from '@/components/GoingFaces';
 import { useAuth } from '@/lib/auth';
-import { formatEventTime, isHostedEvent, parseDateKey, WEEKDAY_NAMES } from '@/lib/events';
+import { formatEventTime, getEventPhase, isHostedEvent, parseDateKey, WEEKDAY_NAMES } from '@/lib/events';
 import { formatDistance, getDisplayName } from '@/lib/format';
 import { openEvent } from '@/lib/links';
 import { CATEGORY_META, colors } from '@/lib/theme';
@@ -29,15 +29,22 @@ export default function EventCard({ occurrence, showRecurrence = false }: EventC
     ? `Every ${WEEKDAY_NAMES[event.weekday ?? date.getDay()]}`
     : date.toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' });
 
+  const phase = getEventPhase(event, occurrence.date);
+  const isLive = phase === 'live';
+  const isEnded = phase === 'ended';
+  const goingLabel = isEnded ? 'went' : 'going';
+  const mentions = Math.max(mentionCount, event.mention_count || 1);
+
   const openLink = () => {
     if (event.link_url) WebBrowser.openBrowserAsync(event.link_url).catch(() => undefined);
   };
 
   return (
     <Pressable
-      onPress={() => openEvent(event.id)}
+      onPress={() => openEvent(event.id, undefined, occurrence.date)}
       accessibilityRole="button"
-      accessibilityLabel={`${event.title} at ${event.space.name}`}
+      accessibilityLabel={`${event.title} at ${event.space.name}${isEnded ? ', ended' : ''}`}
+      style={isEnded ? { opacity: 0.6 } : undefined}
       className="bg-white rounded-3xl border border-slate-200 p-3 flex-row"
     >
       <View
@@ -58,7 +65,20 @@ export default function EventCard({ occurrence, showRecurrence = false }: EventC
       <View className="flex-1">
         <View className="flex-row items-center">
           <Text numberOfLines={1} className="text-[16px] font-extrabold text-ink flex-shrink">{event.title}</Text>
-          {isWeekly && (
+          {isLive && (
+            <View className="flex-row items-center bg-emerald-50 rounded-full px-2 py-0.5 ml-2">
+              <View style={{ backgroundColor: colors.success }} className="w-1.5 h-1.5 rounded-full" />
+              <Text className="text-[10px] font-bold text-emerald-700 ml-1">
+                {event.here_count > 0 ? `Live · ${event.here_count} here` : 'Live'}
+              </Text>
+            </View>
+          )}
+          {isEnded && (
+            <View className="rounded-full px-2 py-0.5 ml-2 bg-slate-100">
+              <Text className="text-[10px] font-bold text-slate-500">Ended</Text>
+            </View>
+          )}
+          {isWeekly && !isLive && !isEnded && (
             <View style={{ backgroundColor: colors.primarySoft }} className="flex-row items-center rounded-full px-2 py-0.5 ml-2">
               <Repeat size={10} color={colors.primary} />
               <Text className="text-[10px] font-bold text-primary ml-1">Weekly</Text>
@@ -88,7 +108,7 @@ export default function EventCard({ occurrence, showRecurrence = false }: EventC
           <Text numberOfLines={2} className="text-[13px] text-slate-600 italic mt-2 leading-[18px]">“{event.snippet}”</Text>
         ) : null}
 
-        {hosted && event.going.length > 0 && (
+        {event.going.length > 0 && (
           <View className="mt-2">
             <GoingFaces people={event.going} currentUserId={userId} size={24} />
           </View>
@@ -106,12 +126,16 @@ export default function EventCard({ occurrence, showRecurrence = false }: EventC
                 <View className="ml-2">
                   <Users size={12} color={colors.muted} />
                 </View>
-                <Text className="text-[12px] font-semibold text-slate-500 ml-1">{event.capacity ? `${event.going_count}/${event.capacity}` : event.going_count} going</Text>
+                <Text className="text-[12px] font-semibold text-slate-500 ml-1">{event.capacity && !isEnded ? `${event.going_count}/${event.capacity}` : event.going_count} {goingLabel}</Text>
               </>
             ) : (
               <Text numberOfLines={1} className="text-[11px] font-semibold text-slate-400 flex-shrink">
-                {event.source_type === 'space' ? 'Mentioned in the place description' : `Mentioned in reviews${event.profile?.username ? ` · @${event.profile.username}` : ` · ${getDisplayName(event.profile)}`}`}
-                {mentionCount > 1 ? ` · ${mentionCount}×` : ''}
+                {event.going_count > 0 ? `${event.going_count} ${goingLabel} · ` : ''}
+                {event.source_type === 'space'
+                  ? 'Mentioned in the place description'
+                  : mentions > 1
+                    ? `Mentioned in ${mentions} reviews`
+                    : `Mentioned in reviews · ${event.profile?.username ? `@${event.profile.username}` : getDisplayName(event.profile)}`}
               </Text>
             )}
           </View>

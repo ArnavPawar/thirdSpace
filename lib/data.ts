@@ -11,8 +11,11 @@ import {
   type EventKind,
   type EventSourceType,
   type EventTheme,
+  type EventMention,
+  type EventMessage,
   type EventVisibility,
   type FeedActivity,
+  MAX_EVENT_MESSAGE_LENGTH,
   type LocalPhoto,
   type Profile,
   type ProfileWithStats,
@@ -33,6 +36,7 @@ import {
 } from '@/types/space';
 import {
   demoComments,
+  demoCrowdProfiles,
   demoCurrentUserId,
   demoFeed,
   demoPhotos,
@@ -46,9 +50,16 @@ import {
 } from './fixtures';
 import {
   buildEventRows,
+  eventSeriesId,
   expandEventDates,
   extractEvents,
+  getEventPhase,
   getMonthRange,
+  isChatOpen,
+  nextOccurrenceDate,
+  parseDateKey,
+  resolveOccurrenceDate,
+  seriesKey,
   toDateKey,
   WEEKLY_LIFETIME_DAYS,
   WEEKLY_LOOKBACK_DAYS,
@@ -67,6 +78,8 @@ type SpaceFilters = {
   viewerId?: string;
 };
 type FeedScope = 'public' | 'following';
+type PresenceRow = { event_id: string; occurrence_date: string; user_id: string; created_at: string };
+type RsvpRow = PresenceRow & { status: RsvpStatus };
 type FeedOptions = {
   currentUserId?: string;
   scope?: FeedScope;
@@ -78,14 +91,16 @@ const localState = {
   feed: [...demoFeed],
   comments: [...demoComments],
   rankings: [...demoRankings],
-  profiles: [...demoProfiles],
+  profiles: [...demoProfiles, ...demoCrowdProfiles],
   following: new Set(['user-mike', 'user-nina']),
   secretAccess: new Set(demoSecretAccess),
   secretRequests: [...demoSecretRequests],
   sessionRatings: {} as Record<string, number>,
   events: null as SpaceEvent[] | null,
   hostedEvents: null as SpaceEvent[] | null,
-  rsvps: [] as { event_id: string; user_id: string; status: RsvpStatus; created_at: string }[],
+  rsvps: [] as RsvpRow[],
+  checkins: [] as PresenceRow[],
+  messages: [] as EventMessage[],
   photos: [...demoPhotos],
 };
 
@@ -586,7 +601,7 @@ export async function submitRating(userId: string, input: SubmitRatingInput): Pr
         source_type: 'space', source_id: space.id, space_id: space.id, source_created_at: timestamp,
       }, space) : []),
     ];
-    localState.events = [...existingEvents, ...newEvents];
+    localState.events = assignLocalSeries([...existingEvents, ...newEvents]);
     eventCache.clear();
 
     localState.feed.unshift({
@@ -1391,6 +1406,7 @@ const spaceEventText = (space: { description?: string | null; hours?: string | n
 
 type StoredEventRow = Omit<EventRow, 'dedupe_key'> & {
   id?: string;
+  series_id?: string | null;
   created_at?: string;
   visibility?: EventVisibility | null;
   theme?: EventTheme | null;
@@ -1402,12 +1418,22 @@ type StoredEventRow = Omit<EventRow, 'dedupe_key'> & {
   cancelled_at?: string | null;
 };
 
+const EMPTY_PRESENCE = {
+  going_count: 0,
+  going: [] as Profile[],
+  viewer_going: false,
+  here_count: 0,
+  here: [] as Profile[],
+  viewer_here: false,
+};
+
 const rowToSpaceEvent = (
   row: StoredEventRow,
   space: SpaceWithAttributes,
   profile?: Profile
 ): SpaceEvent => ({
   id: row.id || `event-${row.source_type}-${row.source_id}-${row.kind}-${row.title}-${row.event_date ?? row.weekday}`,
+  series_id: row.series_id || undefined,
   space_id: row.space_id,
   source_type: row.source_type,
   source_id: row.source_id,
@@ -1431,9 +1457,7 @@ const rowToSpaceEvent = (
   created_at: row.created_at || row.source_created_at,
   space,
   profile,
-  going_count: 0,
-  going: [],
-  viewer_going: false,
+  ...EMPTY_PRESENCE,
 });
 
 function extractSpaceEvents(
@@ -1446,9 +1470,30 @@ function extractSpaceEvents(
   return buildEventRows(extractEvents(text, source.source_created_at), source).map((row) => rowToSpaceEvent(row, space, profile));
 }
 
+// Mirrors assign_event_series in hosted-events.sql: the oldest mention anchors the series.
+function assignLocalSeries(events: SpaceEvent[]): SpaceEvent[] {
+  const groups = new Map<string, SpaceEvent[]>();
+  events.forEach((event) => {
+    if (event.source_type === 'hosted') return;
+    const group = groups.get(seriesKey(event)) || [];
+    group.push(event);
+    groups.set(seriesKey(event), group);
+  });
+  return events.map((event) => {
+    const group = event.source_type === 'hosted' ? undefined : groups.get(seriesKey(event));
+    if (!group) return { ...event, series_id: event.id, mention_count: 1 };
+    const anchor = group.reduce((oldest, candidate) =>
+      candidate.source_created_at.localeCompare(oldest.source_created_at) < 0
+        || (candidate.source_created_at === oldest.source_created_at && candidate.id < oldest.id)
+        ? candidate
+        : oldest);
+    return { ...event, series_id: anchor.id, mention_count: group.length };
+  });
+}
+
 function getLocalEvents(): SpaceEvent[] {
   if (!localState.events) {
-    localState.events = [
+    localState.events = assignLocalSeries([
       ...localState.feed.flatMap((activity) => extractSpaceEvents(activity.review_text, {
         source_type: 'rating',
         source_id: activity.id,
@@ -1462,7 +1507,7 @@ function getLocalEvents(): SpaceEvent[] {
         space_id: space.id,
         source_created_at: space.updated_at,
       }, space)),
-    ];
+    ]);
   }
   return localState.events;
 }
@@ -1514,6 +1559,14 @@ async function fetchRemoteEvents(query: EventQuery): Promise<SpaceEvent[] | null
   });
 }
 
+// Several reviews can mention the same trivia night. Presence lives on the series, so this only picks
+// which mention's link, time, and snippet to show.
+const mentionRichness = (event: SpaceEvent) => Number(Boolean(event.link_url)) + Number(Boolean(event.start_time));
+const isBetterMention = (candidate: SpaceEvent, current: SpaceEvent) =>
+  mentionRichness(candidate) - mentionRichness(current)
+  || current.source_created_at.localeCompare(candidate.source_created_at)
+  || current.id.localeCompare(candidate.id);
+
 function buildOccurrences(events: SpaceEvent[], query: EventQuery): CalendarOccurrence[] {
   const byKey = new Map<string, CalendarOccurrence>();
 
@@ -1522,9 +1575,8 @@ function buildOccurrences(events: SpaceEvent[], query: EventQuery): CalendarOccu
     if (distance > query.radiusMiles) return;
 
     expandEventDates(event, query.monthStart).forEach((date) => {
-      const key = event.source_type === 'hosted'
-        ? `${event.id}|${date}`
-        : `${event.space_id}|${event.title}|${date}`;
+      const series = event.series_id || (event.source_type === 'hosted' ? event.id : seriesKey(event));
+      const key = `${series}|${date}`;
       const existing = byKey.get(key);
       if (!existing) {
         byKey.set(key, { key, date, event, distance, mention_count: 1 });
@@ -1532,9 +1584,7 @@ function buildOccurrences(events: SpaceEvent[], query: EventQuery): CalendarOccu
       }
 
       existing.mention_count += 1;
-      const isRicher = Number(Boolean(event.link_url)) + Number(Boolean(event.start_time)) >
-        Number(Boolean(existing.event.link_url)) + Number(Boolean(existing.event.start_time));
-      if (isRicher) existing.event = event;
+      if (isBetterMention(event, existing.event) > 0) existing.event = event;
     });
   });
 
@@ -1562,20 +1612,91 @@ export async function listEventsNearby(query: EventQuery): Promise<CalendarOccur
   const remoteEvents = await fetchRemoteEvents(query);
   const remoteIds = new Set((remoteEvents || []).map((event) => event.id));
   const hosted = remoteEvents ? [] : getLocalHosted(query.viewerId);
-  const withRsvps = remoteEvents ? await attachRemoteRsvps(remoteEvents, query.viewerId) : [];
-  const events = (remoteEvents
-    ? [...withRsvps, ...localEvents.filter((event) => !remoteIds.has(event.id))]
-    : [...localEvents, ...hosted]
-  ).filter((event) => canShowInLists(event, query.viewerId, Boolean(query.includePrivate)));
+  const events = remoteEvents
+    ? [...remoteEvents, ...localEvents.filter((event) => !remoteIds.has(event.id))]
+    : [...localEvents, ...hosted];
 
-  const occurrences = buildOccurrences(events, query);
+  const built = buildOccurrences(events.filter((event) => !event.cancelled_at), query);
+  const { startKey, endKey } = getMonthRange(query.monthStart);
+  const presence = await loadPresence(built.map((occurrence) => eventSeriesId(occurrence.event)), { from: startKey, to: endKey });
+  const occurrences = built
+    .map((occurrence) => ({ ...occurrence, event: applyPresence(occurrence.event, occurrence.date, presence, query.viewerId) }))
+    .filter((occurrence) => canShowInLists(occurrence.event, query.viewerId, Boolean(query.includePrivate)));
   eventCache.set(cacheKey, occurrences);
   return occurrences;
 }
 
+type Presence = { rsvps: RsvpRow[]; checkins: PresenceRow[]; profiles: Record<string, Profile> };
+
+const placeholderProfile = (userId: string, createdAt = ''): Profile => ({
+  id: userId,
+  user_id: userId,
+  created_at: createdAt,
+  updated_at: createdAt,
+});
+
+const isLocalEventId = (eventId: string) => !isSupabaseConfigured || !supabase || !isUuid(eventId);
+
+function applyPresence(event: SpaceEvent, date: string | undefined, presence: Presence, viewerId?: string): SpaceEvent {
+  if (!date) return event;
+  const series = eventSeriesId(event);
+  const matches = (row: PresenceRow) => row.event_id === series && row.occurrence_date === date;
+  const toPeople = (rows: PresenceRow[]) => rows
+    .sort((first, second) => first.created_at.localeCompare(second.created_at))
+    .map((row) => presence.profiles[row.user_id] || placeholderProfile(row.user_id, row.created_at));
+  const rsvps = presence.rsvps.filter(matches);
+  const checkins = presence.checkins.filter(matches);
+  const going = toPeople(rsvps.filter((row) => row.status === 'going'));
+  const here = toPeople(checkins);
+  const viewerRsvp = viewerId ? rsvps.find((row) => row.user_id === viewerId)?.status : undefined;
+  return {
+    ...event,
+    occurrence_date: date,
+    going,
+    going_count: going.length,
+    viewer_going: viewerRsvp === 'going',
+    viewer_rsvp: viewerRsvp,
+    here,
+    here_count: here.length,
+    viewer_here: Boolean(viewerId && checkins.some((row) => row.user_id === viewerId)),
+  };
+}
+
+function localPresence(eventIds: string[]): Presence {
+  const ids = new Set(eventIds);
+  const rsvps = localState.rsvps.filter((row) => ids.has(row.event_id));
+  const checkins = localState.checkins.filter((row) => ids.has(row.event_id));
+  const profiles: Record<string, Profile> = {};
+  [...rsvps, ...checkins].forEach((row) => {
+    const profile = findLocalProfile(row.user_id);
+    if (profile) profiles[row.user_id] = profile;
+  });
+  return { rsvps, checkins, profiles };
+}
+
+async function loadPresence(eventIds: string[], range?: { from: string; to: string }): Promise<Presence> {
+  const presence = localPresence(eventIds);
+  const remoteIds = Array.from(new Set(eventIds.filter((id) => !isLocalEventId(id))));
+  if (!supabase || remoteIds.length === 0) return presence;
+
+  const scoped = (builder: any) => (range ? builder.gte('occurrence_date', range.from).lte('occurrence_date', range.to) : builder);
+  const [rsvpResult, checkinResult] = await Promise.all([
+    scoped(supabase.from('event_rsvps').select('event_id, occurrence_date, user_id, status, created_at').in('event_id', remoteIds)),
+    scoped(supabase.from('event_checkins').select('event_id, occurrence_date, user_id, created_at').in('event_id', remoteIds)),
+  ]);
+  if (rsvpResult.error) console.warn('Could not load RSVPs:', rsvpResult.error.message);
+  if (checkinResult.error) console.warn('Could not load check-ins:', checkinResult.error.message);
+
+  const rsvps = [...presence.rsvps, ...((rsvpResult.data || []) as RsvpRow[])];
+  const checkins = [...presence.checkins, ...((checkinResult.data || []) as PresenceRow[])];
+  const remoteProfiles = await fetchProfilesByUserId(Array.from(new Set([...rsvps, ...checkins].map((row) => row.user_id))));
+  return { rsvps, checkins, profiles: { ...presence.profiles, ...remoteProfiles } };
+}
+
 const DEMO_COFFEE_EVENT = 'hosted-demo-coffee';
 const DEMO_PRIVATE_EVENT = 'hosted-demo-game';
-const DEMO_PICKUP_EVENT = 'hosted-demo-pickup';
+const DEMO_SPRINT_EVENT = 'hosted-demo-sprint';
+const DEMO_LIVE_EVENT = 'hosted-demo-live';
 
 const createUuid = () => globalThis.crypto?.randomUUID?.() ?? 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (char) => {
   const random = Math.floor(Math.random() * 16);
@@ -1620,127 +1741,230 @@ const canReadEvent = (event: SpaceEvent, viewerId: string | undefined, token?: s
 };
 
 function hydrateHosted(event: SpaceEvent, viewerId?: string): SpaceEvent {
-  const rsvps = localState.rsvps.filter((rsvp) => rsvp.event_id === event.id);
-  const goingIds = rsvps.filter((rsvp) => rsvp.status === 'going').map((rsvp) => rsvp.user_id);
-  const going = goingIds
-    .map((userId) => findLocalProfile(userId))
-    .filter((profile): profile is Profile => Boolean(profile));
-  const viewerRsvp = viewerId ? rsvps.find((rsvp) => rsvp.user_id === viewerId)?.status : undefined;
+  return applyPresence(
+    { ...event, series_id: event.id, profile: event.profile || findLocalProfile(event.host_user_id) },
+    event.event_date,
+    localPresence([event.id]),
+    viewerId
+  );
+}
+
+function withLocalPresence(event: SpaceEvent, date: string | undefined, viewerId?: string): SpaceEvent {
+  return applyPresence(event, date, localPresence([eventSeriesId(event)]), viewerId);
+}
+
+const DEMO_FRIDAY_EVENT = 'hosted-demo-friday';
+const DEMO_SUPPER_EVENT = 'hosted-demo-supper';
+const DEMO_POTLUCK_EVENT = 'hosted-demo-potluck';
+const DEMO_PICNIC_EVENT = 'hosted-demo-picnic';
+
+const minutesAgo = (minutes: number) => new Date(Date.now() - minutes * 60 * 1000).toISOString();
+
+const nextWeekdayFromToday = (weekday: number) => {
+  const today = new Date();
+  return daysFromToday((weekday - today.getDay() + 7) % 7 || 7);
+};
+
+function seedRsvps(eventId: string, date: string, userIds: string[], status: RsvpStatus = 'going') {
+  userIds.forEach((userId, index) => {
+    localState.rsvps.push({ event_id: eventId, occurrence_date: date, user_id: userId, status, created_at: minutesAgo(600 - index * 7) });
+  });
+}
+
+function seedCheckins(eventId: string, date: string, userIds: string[]) {
+  userIds.forEach((userId, index) => {
+    localState.checkins.push({ event_id: eventId, occurrence_date: date, user_id: userId, created_at: minutesAgo(90 - index * 5) });
+  });
+}
+
+function seedMessages(eventId: string, date: string, lines: [string, string][]) {
+  lines.forEach(([userId, body], index) => {
+    localState.messages.push({
+      id: createId('message'),
+      event_id: eventId,
+      occurrence_date: date,
+      user_id: userId,
+      body,
+      created_at: minutesAgo((lines.length - index) * 12),
+    });
+  });
+}
+
+// Mentioned events from the demo reviews get headcounts too: next week's trivia, plus last week's for a recap.
+function seedDemoMentionPresence() {
+  const trivia = getLocalEvents().find((event) => event.title === 'Trivia Night' && event.space_id === '00000000-0000-0000-0000-000000000104');
+  if (trivia?.weekday !== undefined) {
+    const next = nextOccurrenceDate(trivia) || daysFromToday(0);
+    const nextDay = parseDateKey(next);
+    const last = toDateKey(new Date(nextDay.getFullYear(), nextDay.getMonth(), nextDay.getDate() - 7));
+    const series = eventSeriesId(trivia);
+    seedRsvps(series, next, ['user-nina', 'user-emma', 'user-priya', 'user-sam', 'user-zoe', 'user-marcus', 'user-hana', 'user-diego', 'user-maya']);
+    seedRsvps(series, next, ['user-tyler'], 'not_going');
+    seedRsvps(series, last, [demoCurrentUserId, 'user-nina', 'user-emma', 'user-priya', 'user-sam', 'user-zoe', 'user-jordan']);
+    seedCheckins(series, last, [demoCurrentUserId, 'user-nina', 'user-priya', 'user-sam', 'user-jordan']);
+  }
+
+  const runClub = getLocalEvents().find((event) => event.title === 'Run Club');
+  if (runClub) {
+    seedRsvps(eventSeriesId(runClub), nextOccurrenceDate(runClub) || daysFromToday(0), ['user-tyler', 'user-ava', 'user-omar', 'user-mike']);
+  }
+}
+
+type DemoHostedInput = Pick<SpaceEvent, 'id' | 'title' | 'theme' | 'visibility' | 'event_date' | 'start_time' | 'space'> & {
+  host: Profile;
+  description: string;
+  capacity?: number;
+  allowOverCapacity?: boolean;
+};
+
+function demoHosted(input: DemoHostedInput, timestamp: string): SpaceEvent {
   return {
-    ...event,
-    going,
-    going_count: goingIds.length,
-    viewer_going: viewerRsvp === 'going',
-    viewer_rsvp: viewerRsvp,
-    profile: event.profile || findLocalProfile(event.host_user_id),
+    id: input.id,
+    series_id: input.id,
+    space_id: input.space.id,
+    source_type: 'hosted',
+    source_id: input.id,
+    source_user_id: input.host.user_id,
+    host_user_id: input.host.user_id,
+    visibility: input.visibility,
+    theme: input.theme,
+    title: input.title,
+    kind: 'one_time',
+    event_date: input.event_date,
+    start_time: input.start_time,
+    snippet: input.description,
+    description: input.description,
+    capacity: input.capacity,
+    allow_over_capacity: Boolean(input.allowOverCapacity),
+    invite_token: `demo-${input.id}`,
+    source_created_at: timestamp,
+    created_at: timestamp,
+    space: input.space,
+    profile: input.host,
+    ...EMPTY_PRESENCE,
   };
 }
 
 function seedDemoHosted() {
   if (localState.hostedEvents) return;
   const timestamp = toIso();
-  const cafe = localState.spaces.find((space) => space.id === '00000000-0000-0000-0000-000000000101');
-  const board = localState.spaces.find((space) => space.id === '00000000-0000-0000-0000-000000000104');
-  const court = localState.spaces.find((space) => space.category === 'Sports Area' && !space.is_secret);
+  const space = (id: string) => localState.spaces.find((item) => item.id === id);
+  const cafe = space('00000000-0000-0000-0000-000000000101');
+  const park = space('00000000-0000-0000-0000-000000000102');
+  const board = space('00000000-0000-0000-0000-000000000104');
+  const overlook = space('00000000-0000-0000-0000-000000000105');
   const mike = findLocalProfile('user-mike');
   const sarah = findLocalProfile(demoCurrentUserId);
+  const emma = findLocalProfile('user-emma');
+  const nina = findLocalProfile('user-nina');
   const events: SpaceEvent[] = [];
 
   if (cafe && mike) {
-    events.push({
-      id: DEMO_COFFEE_EVENT,
-      space_id: cafe.id,
-      source_type: 'hosted',
-      source_id: DEMO_COFFEE_EVENT,
-      source_user_id: mike.user_id,
-      host_user_id: mike.user_id,
-      visibility: 'public',
-      theme: 'cafe',
-      title: 'After-work coffee hang',
-      kind: 'one_time',
-      event_date: daysFromToday(2),
-      start_time: '18:00',
-      snippet: 'Laptops optional. We will grab the big table upstairs.',
+    const date = daysFromToday(2);
+    events.push(demoHosted({
+      id: DEMO_COFFEE_EVENT, title: 'After-work coffee hang', theme: 'cafe', visibility: 'public',
+      event_date: date, start_time: '18:00', space: cafe, host: mike,
       description: 'Laptops optional. We will grab the big table upstairs.',
-      invite_token: 'demo-coffee-hang',
-      allow_over_capacity: false,
-      source_created_at: timestamp,
-      created_at: timestamp,
-      space: cafe,
-      profile: mike,
-      going_count: 0,
-      going: [],
-      viewer_going: false,
-    });
-    localState.rsvps.push(
-      { event_id: DEMO_COFFEE_EVENT, user_id: demoCurrentUserId, status: 'going', created_at: timestamp },
-      { event_id: DEMO_COFFEE_EVENT, user_id: 'user-emma', status: 'going', created_at: timestamp }
-    );
+    }, timestamp));
+    seedRsvps(DEMO_COFFEE_EVENT, date, [demoCurrentUserId, 'user-emma', 'user-priya', 'user-sam', 'user-hana', 'user-leo']);
+    seedMessages(DEMO_COFFEE_EVENT, date, [
+      ['user-mike', 'I will get there around 5:45 to hold the big table.'],
+      ['user-emma', 'Bringing my laptop, might stay after.'],
+      ['user-priya', 'Is the upstairs open on weekdays? First time here.'],
+      ['user-mike', 'Yep, take the stairs past the pastry case.'],
+    ]);
   }
 
-  if (court && sarah) {
-    events.push({
-      id: DEMO_PICKUP_EVENT,
-      space_id: court.id,
-      source_type: 'hosted',
-      source_id: DEMO_PICKUP_EVENT,
-      source_user_id: sarah.user_id,
-      host_user_id: sarah.user_id,
-      visibility: 'private',
-      theme: 'court',
-      title: 'Pickup basketball',
-      kind: 'one_time',
-      event_date: daysFromToday(3),
-      start_time: '17:00',
-      snippet: 'Full court 5v5. Bring a dark and a light shirt.',
-      description: 'Full court 5v5. Bring a dark and a light shirt.',
-      capacity: 10,
-      allow_over_capacity: false,
-      invite_token: 'demo-pickup-hoops',
-      source_created_at: timestamp,
-      created_at: timestamp,
-      space: court,
-      profile: sarah,
-      going_count: 0,
-      going: [],
-      viewer_going: false,
-    });
-    localState.rsvps.push(
-      { event_id: DEMO_PICKUP_EVENT, user_id: 'user-mike', status: 'going', created_at: timestamp },
-      { event_id: DEMO_PICKUP_EVENT, user_id: 'user-nina', status: 'going', created_at: timestamp },
-      { event_id: DEMO_PICKUP_EVENT, user_id: 'user-emma', status: 'not_going', created_at: timestamp }
-    );
+  // Started an hour ago so the "I'm here" flow is visible in demo mode.
+  if (board && mike) {
+    const today = daysFromToday(0);
+    events.push(demoHosted({
+      id: DEMO_LIVE_EVENT, title: 'Board game night', theme: 'night', visibility: 'public',
+      event_date: today, start_time: `${String(Math.max(0, new Date().getHours() - 1)).padStart(2, '0')}:00`,
+      space: board, host: mike, capacity: 6,
+      description: 'Catan and Codenames on the back table. Newcomers welcome.',
+    }, timestamp));
+    seedRsvps(DEMO_LIVE_EVENT, today, ['user-nina', 'user-emma', 'user-zoe', 'user-marcus']);
+    seedCheckins(DEMO_LIVE_EVENT, today, ['user-mike', 'user-nina', 'user-zoe']);
+  }
+
+  // "Board game night at The Board Room, Friday 8pm, 4 spots open."
+  if (board && mike) {
+    const friday = nextWeekdayFromToday(5);
+    events.push(demoHosted({
+      id: DEMO_FRIDAY_EVENT, title: 'Friday board game night', theme: 'indigo', visibility: 'public',
+      event_date: friday, start_time: '20:00', space: board, host: mike, capacity: 8,
+      description: 'Bring a game or play one of theirs. Two tables, mixed skill levels.',
+    }, timestamp));
+    seedRsvps(DEMO_FRIDAY_EVENT, friday, ['user-mike', 'user-jordan', 'user-diego', 'user-maya']);
+  }
+
+  // Private and full. You answered "Can't go", so it stays in your calendar and "I'm in" shows Full.
+  if (overlook && nina) {
+    const date = daysFromToday(4);
+    events.push(demoHosted({
+      id: DEMO_SUPPER_EVENT, title: 'Sunset supper club', theme: 'sunset', visibility: 'private',
+      event_date: date, start_time: '18:30', space: overlook, host: nina, capacity: 6,
+      description: 'Six seats, one long blanket. Everyone brings a dish to share.',
+    }, timestamp));
+    seedRsvps(DEMO_SUPPER_EVENT, date, ['user-nina', 'user-omar', 'user-ava', 'user-hana', 'user-leo', 'user-priya']);
+    seedRsvps(DEMO_SUPPER_EVENT, date, [demoCurrentUserId], 'not_going');
+  }
+
+  // Private with two spots left, and you're going, so the group chat is open.
+  if (park && emma) {
+    const date = daysFromToday(5);
+    events.push(demoHosted({
+      id: DEMO_POTLUCK_EVENT, title: 'Picnic potluck', theme: 'grove', visibility: 'private',
+      event_date: date, start_time: '13:00', space: park, host: emma, capacity: 10,
+      description: 'Invite only. Emma is bringing the speaker, you bring a side.',
+    }, timestamp));
+    seedRsvps(DEMO_POTLUCK_EVENT, date, ['user-emma', demoCurrentUserId, 'user-nina', 'user-sam', 'user-zoe', 'user-tyler', 'user-maya', 'user-omar']);
+    seedRsvps(DEMO_POTLUCK_EVENT, date, ['user-diego'], 'not_going');
+    seedMessages(DEMO_POTLUCK_EVENT, date, [
+      ['user-emma', 'Spot is by the fountain on the north side. Look for the green blanket.'],
+      ['user-sam', 'I can bring a pasta salad.'],
+      ['user-zoe', 'Lemonade + cups on me'],
+    ]);
+  }
+
+  // Private, over the cap, and the host is letting extras in.
+  if (cafe && sarah) {
+    const date = daysFromToday(3);
+    events.push(demoHosted({
+      id: DEMO_SPRINT_EVENT, title: 'Saturday cowork sprint', theme: 'cafe', visibility: 'private',
+      event_date: date, start_time: '10:00', space: cafe, host: sarah, capacity: 10, allowOverCapacity: true,
+      description: 'Two 90-minute focus blocks with a coffee break in between. Invite only.',
+    }, timestamp));
+    seedRsvps(DEMO_SPRINT_EVENT, date, [
+      demoCurrentUserId, 'user-mike', 'user-nina', 'user-jordan', 'user-marcus', 'user-diego',
+      'user-tyler', 'user-omar', 'user-leo', 'user-sam', 'user-ava',
+    ]);
+    seedRsvps(DEMO_SPRINT_EVENT, date, ['user-emma'], 'not_going');
   }
 
   if (board && sarah) {
-    events.push({
-      id: DEMO_PRIVATE_EVENT,
-      space_id: board.id,
-      source_type: 'hosted',
-      source_id: DEMO_PRIVATE_EVENT,
-      source_user_id: sarah.user_id,
-      host_user_id: sarah.user_id,
-      visibility: 'private',
-      theme: 'night',
-      title: 'Friends-only game night',
-      kind: 'one_time',
-      event_date: daysFromToday(6),
-      start_time: '19:30',
-      snippet: 'Just us. Bring a game if you have one.',
+    events.push(demoHosted({
+      id: DEMO_PRIVATE_EVENT, title: 'Friends-only game night', theme: 'night', visibility: 'private',
+      event_date: daysFromToday(6), start_time: '19:30', space: board, host: sarah,
       description: 'Just us. Bring a game if you have one.',
-      invite_token: 'demo-private-game-night',
-      allow_over_capacity: false,
-      source_created_at: timestamp,
-      created_at: timestamp,
-      space: board,
-      profile: sarah,
-      going_count: 0,
-      going: [],
-      viewer_going: false,
-    });
+    }, timestamp));
+  }
+
+  // Already happened, so you can see the recap.
+  if (overlook && nina) {
+    const date = daysFromToday(-3);
+    events.push(demoHosted({
+      id: DEMO_PICNIC_EVENT, title: 'Plane-spotting picnic', theme: 'sunset', visibility: 'public',
+      event_date: date, start_time: '17:30', space: overlook, host: nina,
+      description: 'Blankets out by the runway fence. Bring snacks.',
+    }, timestamp));
+    seedRsvps(DEMO_PICNIC_EVENT, date, [demoCurrentUserId, 'user-nina', 'user-omar', 'user-ava', 'user-mike', 'user-hana', 'user-tyler']);
+    seedCheckins(DEMO_PICNIC_EVENT, date, [demoCurrentUserId, 'user-nina', 'user-omar', 'user-ava', 'user-hana']);
   }
 
   localState.hostedEvents = events;
+  seedDemoMentionPresence();
 }
 
 function getLocalHosted(viewerId?: string) {
@@ -1770,6 +1994,7 @@ function mapStoredEventRow(row: Record<string, unknown>): StoredEventRow {
     allow_over_capacity: Boolean(row.allow_over_capacity),
     invite_token: (row.invite_token as string | null) ?? null,
     cancelled_at: (row.cancelled_at as string | null) ?? null,
+    series_id: (row.series_id as string | null) ?? null,
     source_created_at: String(row.source_created_at),
     created_at: String(row.created_at),
   };
@@ -1791,62 +2016,31 @@ function profileFromPayload(row: Record<string, unknown> | null | undefined): Pr
   };
 }
 
-async function attachRemoteRsvps(events: SpaceEvent[], viewerId?: string): Promise<SpaceEvent[]> {
-  const ids = events.map((event) => event.id).filter(isUuid);
-  if (!supabase || ids.length === 0) return events;
-
-  const { data, error } = await supabase.from('event_rsvps').select('event_id, user_id, status').in('event_id', ids);
-  if (error) {
-    console.warn('Could not load RSVPs:', error.message);
-    return events;
-  }
-
-  const allRows = (data || []) as { event_id: string; user_id: string; status: RsvpStatus }[];
-  const rows = allRows.filter((row) => row.status === 'going');
-  const viewerStatus = new Map(allRows.filter((row) => row.user_id === viewerId).map((row) => [row.event_id, row.status]));
-  const profiles = await fetchProfilesByUserId(rows.map((row) => row.user_id));
-  const byEvent = new Map<string, Profile[]>();
-  rows.forEach((row) => {
-    const list = byEvent.get(row.event_id) || [];
-    list.push(profiles[row.user_id] || {
-      id: row.user_id,
-      user_id: row.user_id,
-      created_at: '',
-      updated_at: '',
-    });
-    byEvent.set(row.event_id, list);
-  });
-
-  return events.map((event) => {
-    const going = byEvent.get(event.id) || event.going;
-    const viewerRsvp = viewerStatus.get(event.id);
-    return {
-      ...event,
-      going,
-      going_count: going.length,
-      viewer_going: viewerRsvp === 'going',
-      viewer_rsvp: viewerRsvp,
-    };
-  });
-}
+const profilesFromPayload = (value: unknown) => (Array.isArray(value)
+  ? value.map((row) => profileFromPayload(row as Record<string, unknown>)).filter((profile): profile is Profile => Boolean(profile))
+  : []);
 
 function mapFetchedEvent(payload: Record<string, unknown>, viewerId?: string): SpaceEvent | null {
   const eventRow = payload.event as Record<string, unknown> | undefined;
   const spaceRow = payload.space as Record<string, unknown> | undefined;
   if (!eventRow || !spaceRow) return null;
-  const going = Array.isArray(payload.going)
-    ? payload.going.map((row) => profileFromPayload(row as Record<string, unknown>)).filter((profile): profile is Profile => Boolean(profile))
-    : [];
+  const going = profilesFromPayload(payload.going);
+  const here = profilesFromPayload(payload.here);
   const event = rowToSpaceEvent(mapStoredEventRow(eventRow), mapSpaceRow(spaceRow), profileFromPayload(payload.host as Record<string, unknown> | undefined));
   const viewerRsvp = payload.viewer_status === 'going' || payload.viewer_status === 'not_going'
     ? payload.viewer_status as RsvpStatus
     : undefined;
   return {
     ...event,
+    occurrence_date: typeof payload.occurrence_date === 'string' ? payload.occurrence_date : event.event_date,
+    mention_count: payload.mention_count === undefined ? undefined : Number(payload.mention_count),
     going,
     going_count: going.length,
     viewer_going: viewerRsvp === 'going' || Boolean(viewerId && going.some((person) => person.user_id === viewerId)),
     viewer_rsvp: viewerRsvp,
+    here,
+    here_count: here.length,
+    viewer_here: Boolean(payload.viewer_here) || Boolean(viewerId && here.some((person) => person.user_id === viewerId)),
   };
 }
 
@@ -1971,9 +2165,7 @@ export async function createHostedEvent(userId: string, input: CreateHostedEvent
     created_at: timestamp,
     space,
     profile,
-    going_count: 0,
-    going: [],
-    viewer_going: false,
+    ...EMPTY_PRESENCE,
   };
 
   if (!canUseUserScopedRemote(userId)) {
@@ -2032,14 +2224,16 @@ export async function updateHostedEventTheme(userId: string, eventId: string, th
   eventCache.clear();
 }
 
-export async function getEvent(eventId: string, viewerId?: string, token?: string): Promise<SpaceEvent | null> {
-  if (!isSupabaseConfigured || !supabase || !isUuid(eventId)) {
+// `date` picks the occurrence for weekly events; one-time events always use their own date.
+export async function getEvent(eventId: string, viewerId?: string, token?: string, date?: string): Promise<SpaceEvent | null> {
+  if (isLocalEventId(eventId)) {
     const hosted = getLocalHosted(viewerId).find((event) => event.id === eventId);
     if (hosted) return canReadEvent(hosted, viewerId, token) ? hosted : null;
-    return getLocalEvents().find((event) => event.id === eventId) || null;
+    const mentioned = getLocalEvents().find((event) => event.id === eventId);
+    return mentioned ? withLocalPresence(mentioned, resolveOccurrenceDate(mentioned, date), viewerId) : null;
   }
 
-  const { data, error } = await supabase.rpc('fetch_event', { target_id: eventId, token: token || null });
+  const { data, error } = await supabase.rpc('fetch_event', { target_id: eventId, token: token || null, occurrence: date || null });
   if (!error && data) return mapFetchedEvent(data as Record<string, unknown>, viewerId);
   if (error) console.warn('fetch_event failed, trying a direct read:', error.message);
 
@@ -2052,32 +2246,80 @@ export async function getEvent(eventId: string, viewerId?: string, token?: strin
   const stored = mapStoredEventRow(row as Record<string, unknown>);
   const hostId = stored.host_user_id || stored.source_user_id;
   const profiles = hostId ? await fetchProfilesByUserId([hostId]) : {};
-  const [event] = await attachRemoteRsvps([
-    rowToSpaceEvent(stored, mapSpaceRow((row as Record<string, unknown>).spaces as Record<string, unknown>), hostId ? profiles[hostId] : undefined),
-  ], viewerId);
+  const event = rowToSpaceEvent(stored, mapSpaceRow((row as Record<string, unknown>).spaces as Record<string, unknown>), hostId ? profiles[hostId] : undefined);
+  return applyPresence(event, resolveOccurrenceDate(event, date), await loadPresence([eventSeriesId(event)]), viewerId);
+}
+
+function findLocalEventForPresence(eventId: string, userId: string, token?: string) {
+  const event = getLocalHosted(userId).find((item) => item.id === eventId)
+    || getLocalEvents().find((item) => item.id === eventId);
+  if (!event || event.cancelled_at) throw new Error('Event not found');
+  if (!canReadEvent(event, userId, token)) throw new Error('You need an invite for this one');
   return event;
 }
 
-export async function setEventRsvp(userId: string, eventId: string, status: RsvpStatus | null, token?: string): Promise<void> {
+export async function setEventRsvp(
+  userId: string,
+  eventId: string,
+  status: RsvpStatus | null,
+  token?: string,
+  date?: string
+): Promise<void> {
   if (isSupabaseConfigured && supabase && !isUuid(userId)) throw new Error('Sign in to RSVP');
 
-  if (!canUseUserScopedRemote(userId)) {
-    const event = getLocalHosted(userId).find((item) => item.id === eventId);
-    if (!event || event.source_type !== 'hosted' || event.cancelled_at) throw new Error('Event not found');
-    if (!canReadEvent(event, userId, token)) throw new Error('You need an invite to RSVP');
-    const others = localState.rsvps.filter((rsvp) => !(rsvp.event_id === eventId && rsvp.user_id === userId));
+  if (isLocalEventId(eventId) || !canUseUserScopedRemote(userId)) {
+    const event = findLocalEventForPresence(eventId, userId, token);
+    const occurrence = resolveOccurrenceDate(event, date);
+    if (!occurrence) throw new Error('Pick a date for this event');
+    if (status && getEventPhase(event, occurrence) === 'ended') throw new Error('This event already happened');
+    const series = eventSeriesId(event);
+    const isSameSlot = (rsvp: RsvpRow) => rsvp.event_id === series && rsvp.occurrence_date === occurrence;
+    const others = localState.rsvps.filter((rsvp) => !(isSameSlot(rsvp) && rsvp.user_id === userId));
     if (status === 'going' && event.capacity && !event.allow_over_capacity) {
-      const count = others.filter((rsvp) => rsvp.event_id === eventId && rsvp.status === 'going').length;
+      const count = others.filter((rsvp) => isSameSlot(rsvp) && rsvp.status === 'going').length;
       if (count >= event.capacity) throw new Error('This event is full');
     }
     localState.rsvps = status
-      ? [...others, { event_id: eventId, user_id: userId, status, created_at: toIso() }]
+      ? [...others, { event_id: series, occurrence_date: occurrence, user_id: userId, status, created_at: toIso() }]
       : others;
     eventCache.clear();
     return;
   }
 
-  const { error } = await supabase.rpc('set_event_rsvp', { target_id: eventId, rsvp_status: status, token: token || null });
+  const { error } = await supabase.rpc('set_event_rsvp', {
+    target_id: eventId,
+    rsvp_status: status,
+    token: token || null,
+    occurrence: date || null,
+  });
+  if (error) throw new Error(error.message);
+  eventCache.clear();
+}
+
+export async function setEventCheckin(userId: string, eventId: string, here: boolean, token?: string, date?: string): Promise<void> {
+  if (isSupabaseConfigured && supabase && !isUuid(userId)) throw new Error('Sign in to check in');
+
+  if (isLocalEventId(eventId) || !canUseUserScopedRemote(userId)) {
+    const event = findLocalEventForPresence(eventId, userId, token);
+    const occurrence = resolveOccurrenceDate(event, date);
+    if (!occurrence) throw new Error('Pick a date for this event');
+    if (here && getEventPhase(event, occurrence) !== 'live') throw new Error('You can only check in while it is happening');
+    const series = eventSeriesId(event);
+    const others = localState.checkins.filter((row) =>
+      !(row.event_id === series && row.occurrence_date === occurrence && row.user_id === userId));
+    localState.checkins = here
+      ? [...others, { event_id: series, occurrence_date: occurrence, user_id: userId, created_at: toIso() }]
+      : others;
+    eventCache.clear();
+    return;
+  }
+
+  const { error } = await supabase.rpc('set_event_checkin', {
+    target_id: eventId,
+    is_here: here,
+    token: token || null,
+    occurrence: date || null,
+  });
   if (error) throw new Error(error.message);
   eventCache.clear();
 }
@@ -2117,19 +2359,208 @@ export async function listSpaceEvents(spaceId: string, viewerId?: string): Promi
         const hostId = (row.host_user_id as string | null) || (row.source_user_id as string | null);
         return rowToSpaceEvent(mapStoredEventRow(row), mapSpaceRow(row.spaces as Record<string, unknown>), hostId ? profiles[hostId] : undefined);
       });
-      remote = await attachRemoteRsvps(mapped, viewerId);
+      remote = mapped;
     }
   }
 
-  const seen = new Set<string>();
-  return [...remote, ...getLocalEvents().filter((event) => event.space_id === spaceId), ...localHosted]
-    .filter((event) => {
-      const signature = `${event.source_type}|${event.title}|${event.event_date ?? ''}|${event.weekday ?? ''}`;
-      if (seen.has(signature) || !canShowInLists(event, viewerId, true, true)) return false;
-      if (event.kind === 'one_time' && event.event_date && event.event_date < today) return false;
-      seen.add(signature);
-      return true;
-    })
-    .sort((first, second) => (first.event_date || '9999').localeCompare(second.event_date || '9999')
+  const remoteIds = new Set(remote.map((event) => event.id));
+  const candidates = [
+    ...remote,
+    ...getLocalEvents().filter((event) => event.space_id === spaceId && !remoteIds.has(event.id)),
+    ...localHosted,
+  ].filter((event) => !(event.kind === 'one_time' && event.event_date && event.event_date < today));
+
+  // One card per series: the mention with the soonest date, so "trivia every Tuesday" and
+  // "trivia on the 13th" don't show up twice.
+  const bySeries = new Map<string, { event: SpaceEvent; date: string; mentions: number }>();
+  candidates.forEach((event) => {
+    const date = nextOccurrenceDate(event);
+    if (!date) return;
+    const key = event.series_id || (event.source_type === 'hosted' ? event.id : seriesKey(event));
+    const current = bySeries.get(key);
+    if (!current) {
+      bySeries.set(key, { event, date, mentions: 1 });
+      return;
+    }
+    current.mentions += 1;
+    if (date < current.date || (date === current.date && isBetterMention(event, current.event) > 0)) {
+      current.event = event;
+      current.date = date;
+    }
+  });
+
+  const picks = Array.from(bySeries.values());
+  const presence = await loadPresence(picks.map((pick) => eventSeriesId(pick.event)));
+  return picks
+    .map((pick) => applyPresence(
+      { ...pick.event, mention_count: Math.max(pick.event.mention_count || 0, pick.mentions) },
+      pick.date,
+      presence,
+      viewerId
+    ))
+    .filter((event) => canShowInLists(event, viewerId, true, true))
+    .sort((first, second) => (first.occurrence_date || '9999').localeCompare(second.occurrence_date || '9999')
       || (first.start_time || '99:99').localeCompare(second.start_time || '99:99'));
+}
+
+const toMention = (event: SpaceEvent): EventMention => ({
+  id: event.id,
+  source_type: event.source_type,
+  snippet: event.snippet,
+  kind: event.kind,
+  event_date: event.event_date,
+  weekday: event.weekday,
+  start_time: event.start_time,
+  link_url: event.link_url,
+  source_created_at: event.source_created_at,
+  profile: event.profile,
+});
+
+/** Every review/description in the event's series, with the one being shown first and the rest newest first. */
+export async function listEventMentions(event: SpaceEvent): Promise<EventMention[]> {
+  if (event.source_type === 'hosted') return [];
+  const series = eventSeriesId(event);
+  let mentions: EventMention[] = [];
+
+  if (!isLocalEventId(event.id) && supabase) {
+    const { data, error } = await supabase
+      .from('space_events')
+      .select('id, source_type, source_user_id, snippet, kind, event_date, weekday, start_time, link_url, source_created_at')
+      .eq('series_id', series)
+      .neq('source_type', 'hosted')
+      .limit(50);
+    if (error) {
+      console.warn('Could not load other mentions:', error.message);
+    } else if (data) {
+      const rows = data as Record<string, unknown>[];
+      const profiles = await fetchProfilesByUserId(rows.map((row) => row.source_user_id).filter(Boolean).map(String));
+      mentions = rows.map((row) => ({
+        id: String(row.id),
+        source_type: row.source_type as EventMention['source_type'],
+        snippet: String(row.snippet),
+        kind: row.kind as EventMention['kind'],
+        event_date: (row.event_date as string | null) || undefined,
+        weekday: (row.weekday as number | null) ?? undefined,
+        start_time: (row.start_time as string | null) || undefined,
+        link_url: (row.link_url as string | null) || undefined,
+        source_created_at: String(row.source_created_at),
+        profile: row.source_user_id ? profiles[String(row.source_user_id)] : undefined,
+      }));
+    }
+  } else {
+    mentions = getLocalEvents()
+      .filter((candidate) => candidate.source_type !== 'hosted' && eventSeriesId(candidate) === series)
+      .map(toMention);
+  }
+
+  const others = mentions
+    .filter((mention) => mention.id !== event.id)
+    .sort((first, second) => second.source_created_at.localeCompare(first.source_created_at));
+  return [toMention(event), ...others];
+}
+
+const mapMessageRow = (row: Record<string, unknown>, profiles: Record<string, Profile>): EventMessage => ({
+  id: String(row.id),
+  event_id: String(row.event_id),
+  occurrence_date: String(row.occurrence_date),
+  user_id: String(row.user_id),
+  body: String(row.body || ''),
+  created_at: String(row.created_at),
+  profile: profiles[String(row.user_id)] || findLocalProfile(String(row.user_id)),
+});
+
+type MessageListener = (message: EventMessage) => void;
+const localChatListeners = new Map<string, Set<MessageListener>>();
+const chatKey = (eventId: string, date: string) => `${eventId}|${date}`;
+
+/** The host and people going for that date are in the chat, and it closes the day after the event. */
+export function canUseEventChat(event: SpaceEvent, viewerId?: string) {
+  if (!viewerId || event.cancelled_at || !event.occurrence_date) return false;
+  if (!isChatOpen(event.occurrence_date)) return false;
+  return event.host_user_id === viewerId || event.viewer_going;
+}
+
+export async function listEventMessages(event: SpaceEvent, date: string): Promise<EventMessage[]> {
+  const seriesId = eventSeriesId(event);
+  if (isLocalEventId(seriesId)) {
+    if (!isChatOpen(date)) return [];
+    return byCreatedAtDesc(localState.messages.filter((message) => message.event_id === seriesId && message.occurrence_date === date))
+      .reverse()
+      .map((message) => ({ ...message, profile: findLocalProfile(message.user_id) }));
+  }
+
+  const { data, error } = await supabase
+    .from('event_messages')
+    .select('*')
+    .eq('event_id', seriesId)
+    .eq('occurrence_date', date)
+    .order('created_at', { ascending: false })
+    .limit(300);
+  if (error) throw new Error(error.message);
+  const rows = ((data || []) as Record<string, unknown>[]).reverse();
+  const profiles = await fetchProfilesByUserId(Array.from(new Set(rows.map((row) => String(row.user_id)))));
+  return rows.map((row) => mapMessageRow(row, profiles));
+}
+
+export async function sendEventMessage(userId: string, event: SpaceEvent, body: string): Promise<EventMessage> {
+  const text = body.trim();
+  if (!text) throw new Error('Write something first.');
+  if (text.length > MAX_EVENT_MESSAGE_LENGTH) throw new Error(`Keep it under ${MAX_EVENT_MESSAGE_LENGTH} characters.`);
+  if (!canUseEventChat(event, userId) || !event.occurrence_date) throw new Error('RSVP going to join the chat.');
+  if (isSupabaseConfigured && supabase && !isUuid(userId)) throw new Error('Sign in to chat');
+
+  const seriesId = eventSeriesId(event);
+  if (isLocalEventId(seriesId) || !canUseUserScopedRemote(userId)) {
+    const message: EventMessage = {
+      id: createId('message'),
+      event_id: seriesId,
+      occurrence_date: event.occurrence_date,
+      user_id: userId,
+      body: text,
+      created_at: toIso(),
+      profile: findLocalProfile(userId),
+    };
+    localState.messages.push(message);
+    localChatListeners.get(chatKey(seriesId, event.occurrence_date))?.forEach((listener) => listener(message));
+    return message;
+  }
+
+  const { data, error } = await supabase
+    .from('event_messages')
+    .insert({ event_id: seriesId, occurrence_date: event.occurrence_date, user_id: userId, body: text })
+    .select()
+    .single();
+  if (error) throw new Error(error.message);
+  const profiles = await fetchProfilesByUserId([userId]);
+  return mapMessageRow(data as Record<string, unknown>, profiles);
+}
+
+/** Calls `onMessage` for every new message in the chat. Returns an unsubscribe function. */
+export function subscribeToEventMessages(event: SpaceEvent, date: string, onMessage: MessageListener): () => void {
+  const seriesId = eventSeriesId(event);
+  if (isLocalEventId(seriesId)) {
+    const key = chatKey(seriesId, date);
+    const listeners = localChatListeners.get(key) || new Set<MessageListener>();
+    listeners.add(onMessage);
+    localChatListeners.set(key, listeners);
+    return () => {
+      listeners.delete(onMessage);
+    };
+  }
+
+  const channel = supabase
+    .channel(`event-chat-${seriesId}-${date}`)
+    .on(
+      'postgres_changes',
+      { event: 'INSERT', schema: 'public', table: 'event_messages', filter: `event_id=eq.${seriesId}` },
+      async (payload: { new: Record<string, unknown> }) => {
+        if (String(payload.new.occurrence_date) !== date) return;
+        const profiles = await fetchProfilesByUserId([String(payload.new.user_id)]);
+        onMessage(mapMessageRow(payload.new, profiles));
+      }
+    )
+    .subscribe();
+  return () => {
+    supabase.removeChannel(channel);
+  };
 }
