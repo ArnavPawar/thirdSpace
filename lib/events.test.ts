@@ -5,6 +5,7 @@ import {
   findStartTime,
   formatEventTime,
   getEventPhase,
+  eventOrigin,
   isChatOpen,
   nextOccurrenceAfter,
   nextOccurrenceDate,
@@ -130,5 +131,11 @@ assert(
 );
 const runClub = extractEvents('Joined the run club Thursday nights. Easy pace groups.', reference)[0];
 assert(runClub?.title === 'Run Club' && runClub.weekday === 4, '"Thursday nights" run club joins the Thursday series');
+
+assert(eventOrigin({ source_type: 'review' }) === 'reviews', 'review mentions are reviews');
+assert(eventOrigin({ source_type: 'space' }) === 'reviews', 'place descriptions group with reviews');
+assert(eventOrigin({ source_type: 'hosted', visibility: 'public' }) === 'public', 'public hangout');
+assert(eventOrigin({ source_type: 'hosted', visibility: 'private' }) === 'private', 'private invite');
+assert(eventOrigin({ source_type: 'hosted' }) === 'public', 'hosted without visibility is public');
 
 console.log('events tests passed');

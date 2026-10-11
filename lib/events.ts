@@ -384,6 +384,14 @@ export function isHostedEvent(event: { source_type: string }) {
   return event.source_type === 'hosted';
 }
 
+export type EventOrigin = 'reviews' | 'public' | 'private';
+
+/** Where an event came from: picked out of reviews/descriptions, or a hangout someone posted. */
+export function eventOrigin(event: { source_type: string; visibility?: string | null }): EventOrigin {
+  if (!isHostedEvent(event)) return 'reviews';
+  return event.visibility === 'private' ? 'private' : 'public';
+}
+
 /**
  * Every review mentioning "Trivia Night" at the same spot is one series. RSVPs, check-ins, and the
  * group chat attach to the series so the headcount doesn't split across mentions.

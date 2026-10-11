@@ -3,20 +3,29 @@ import { ActivityIndicator, Alert, Pressable, RefreshControl, ScrollView, Text, 
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router, useFocusEffect } from 'expo-router';
 import * as Location from 'expo-location';
-import { CalendarDays, ChevronDown, ChevronUp, Plus, Repeat } from 'lucide-react-native';
+import { CalendarDays, ChevronDown, ChevronUp, Globe, Lock, MessageSquareQuote, Plus, Repeat, type LucideIcon } from 'lucide-react-native';
 import EventCard from '@/components/EventCard';
 import MonthGrid from '@/components/MonthGrid';
 import RangeBar, { RANGE_STOPS } from '@/components/RangeBar';
-import { EmptyState, ScreenHeader, SectionTitle } from '@/components/ui';
+import { Chip, EmptyState, ScreenHeader, SectionTitle } from '@/components/ui';
 import { useAuth } from '@/lib/auth';
 import { listEventsNearby } from '@/lib/data';
-import { parseDateKey, toDateKey } from '@/lib/events';
+import { eventOrigin, parseDateKey, toDateKey, type EventOrigin } from '@/lib/events';
 import { colors } from '@/lib/theme';
 import type { CalendarOccurrence, SpaceCategory } from '@/types/space';
 
 const ARLINGTON = { latitude: 38.8816, longitude: -77.1081 };
 const DEFAULT_RADIUS = 5;
 const RANGE_DEBOUNCE_MS = 250;
+
+type SourceFilter = 'all' | EventOrigin;
+
+const SOURCE_FILTERS: { value: SourceFilter; label: string; icon?: LucideIcon; empty: string }[] = [
+  { value: 'all', label: 'All', empty: 'Nothing listed' },
+  { value: 'reviews', label: 'From reviews', icon: MessageSquareQuote, empty: 'No events from reviews' },
+  { value: 'public', label: 'Public hangouts', icon: Globe, empty: 'No public hangouts' },
+  { value: 'private', label: 'Private invites', icon: Lock, empty: 'No private invites' },
+];
 
 const firstOfMonth = (date: Date) => new Date(date.getFullYear(), date.getMonth(), 1);
 const eventIdentity = (occurrence: CalendarOccurrence) =>
@@ -33,7 +42,8 @@ export default function CalendarScreen() {
   const [isDraggingRange, setIsDraggingRange] = useState(false);
   const [center, setCenter] = useState(ARLINGTON);
   const [hasUserLocation, setHasUserLocation] = useState(false);
-  const [occurrences, setOccurrences] = useState<CalendarOccurrence[]>([]);
+  const [allOccurrences, setOccurrences] = useState<CalendarOccurrence[]>([]);
+  const [sourceFilter, setSourceFilter] = useState<SourceFilter>('all');
   const [isLoading, setIsLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [showWeekly, setShowWeekly] = useState(true);
@@ -93,6 +103,24 @@ export default function CalendarScreen() {
     setMonthStart((current) => new Date(current.getFullYear(), current.getMonth() + delta, 1));
   }, []);
 
+  const sourceCounts = useMemo(() => {
+    const counts: Record<SourceFilter, Set<string>> = { all: new Set(), reviews: new Set(), public: new Set(), private: new Set() };
+    for (const occurrence of allOccurrences) {
+      const identity = eventIdentity(occurrence);
+      counts.all.add(identity);
+      counts[eventOrigin(occurrence.event)].add(identity);
+    }
+    return counts;
+  }, [allOccurrences]);
+
+  const occurrences = useMemo(
+    () => sourceFilter === 'all'
+      ? allOccurrences
+      : allOccurrences.filter((occurrence) => eventOrigin(occurrence.event) === sourceFilter),
+    [allOccurrences, sourceFilter]
+  );
+  const activeFilter = SOURCE_FILTERS.find((filter) => filter.value === sourceFilter)!;
+
   const todayKey = toDateKey(new Date());
   const isCurrentMonth = monthStart.getTime() === firstOfMonth(new Date()).getTime();
 
@@ -124,7 +152,7 @@ export default function CalendarScreen() {
       return {
         title: parseDateKey(selectedDate).toLocaleDateString(undefined, { weekday: 'long', month: 'long', day: 'numeric' }),
         items: occurrences.filter((occurrence) => occurrence.date === selectedDate),
-        empty: 'Nothing listed for this day yet.',
+        empty: sourceFilter === 'all' ? 'Nothing listed for this day yet.' : `${activeFilter.empty} on this day.`,
       };
     }
 
@@ -134,16 +162,16 @@ export default function CalendarScreen() {
       return {
         title: 'This week',
         items: occurrences.filter((occurrence) => occurrence.date >= todayKey && occurrence.date <= weekEndKey),
-        empty: 'Nothing else this week. Check the weekly regulars below.',
+        empty: sourceFilter === 'all' ? 'Nothing else this week. Check the weekly regulars below.' : `${activeFilter.empty} this week.`,
       };
     }
 
     return {
       title: `Coming up in ${monthStart.toLocaleDateString(undefined, { month: 'long' })}`,
       items: occurrences.filter((occurrence) => occurrence.event.kind === 'one_time'),
-      empty: 'No one-off events this month yet.',
+      empty: sourceFilter === 'all' ? 'No one-off events this month yet.' : `${activeFilter.empty} this month.`,
     };
-  }, [isCurrentMonth, monthStart, occurrences, selectedDate, todayKey]);
+  }, [activeFilter, isCurrentMonth, monthStart, occurrences, selectedDate, sourceFilter, todayKey]);
 
   const nextWiderRadius = RANGE_STOPS.find((stop) => stop > radius);
 
@@ -177,6 +205,20 @@ export default function CalendarScreen() {
             onDraggingChange={setIsDraggingRange}
             eventCount={isLoading ? undefined : eventCount}
           />
+          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8 }} className="-mx-4 px-4">
+            {SOURCE_FILTERS.map((filter) => {
+              const count = sourceCounts[filter.value].size;
+              return (
+                <Chip
+                  key={filter.value}
+                  label={isLoading ? filter.label : `${filter.label} · ${count}`}
+                  icon={filter.icon}
+                  selected={sourceFilter === filter.value}
+                  onPress={() => setSourceFilter(filter.value)}
+                />
+              );
+            })}
+          </ScrollView>
           <MonthGrid
             monthStart={monthStart}
             categoriesByDate={categoriesByDate}
@@ -190,6 +232,18 @@ export default function CalendarScreen() {
         {isLoading ? (
           <View className="py-16 items-center">
             <ActivityIndicator color={colors.primary} />
+          </View>
+        ) : allOccurrences.length > 0 && occurrences.length === 0 ? (
+          <View className="px-4 mt-5">
+            <EmptyState
+              icon={activeFilter.icon ?? CalendarDays}
+              title={`${activeFilter.empty} this month`}
+              body={sourceFilter === 'private'
+                ? 'Invite-only hangouts show up here once someone sends you the link, or when you host one.'
+                : 'Try another filter, or host something yourself.'}
+              actionLabel="Show everything"
+              onAction={() => setSourceFilter('all')}
+            />
           </View>
         ) : occurrences.length === 0 ? (
           <View className="px-4 mt-5">
