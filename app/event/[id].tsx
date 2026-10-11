@@ -13,14 +13,23 @@ import {
   MapPin,
   MapPinCheck,
   MessageCircle,
+  MessageSquareQuote,
   Share2,
   Users,
 } from 'lucide-react-native';
 import { EventPoster, ThemePicker } from '@/components/EventPoster';
 import GoingFaces from '@/components/GoingFaces';
-import { CategoryIcon, EmptyState } from '@/components/ui';
+import { Avatar, CategoryIcon, EmptyState } from '@/components/ui';
 import { useAuth } from '@/lib/auth';
-import { cancelHostedEvent, canUseEventChat, getEvent, setEventCheckin, setEventRsvp, updateHostedEventTheme } from '@/lib/data';
+import {
+  cancelHostedEvent,
+  canUseEventChat,
+  getEvent,
+  listEventMentions,
+  setEventCheckin,
+  setEventRsvp,
+  updateHostedEventTheme,
+} from '@/lib/data';
 import {
   formatEventWhen,
   getChatClosesAt,
@@ -31,10 +40,10 @@ import {
   parseDateKey,
   type EventPhase,
 } from '@/lib/events';
-import { getDisplayName } from '@/lib/format';
+import { formatTimeAgo, getDisplayName } from '@/lib/format';
 import { eventHref, openEventChat, openExternalUrl, openProfile, requireSignedIn, shareEvent } from '@/lib/links';
 import { CATEGORY_META, colors } from '@/lib/theme';
-import type { EventTheme, RsvpStatus, SpaceEvent } from '@/types/space';
+import type { EventMention, EventTheme, RsvpStatus, SpaceEvent } from '@/types/space';
 
 const firstParam = (value?: string | string[]) => (Array.isArray(value) ? value[0] : value);
 
@@ -167,6 +176,64 @@ function EventRecap({
   );
 }
 
+const MENTIONS_PREVIEW = 3;
+
+function EventMentions({ mentions, spaceName, userId }: { mentions: EventMention[]; spaceName: string; userId: string }) {
+  const [expanded, setExpanded] = useState(false);
+  const visible = expanded ? mentions : mentions.slice(0, MENTIONS_PREVIEW);
+  const hidden = mentions.length - visible.length;
+
+  return (
+    <View className="bg-white rounded-3xl border border-slate-200 p-5 mt-3">
+      <View className="flex-row items-center mb-1">
+        <MessageSquareQuote size={18} color={colors.primary} />
+        <Text className="text-[17px] font-bold text-ink ml-2 flex-1">What people are saying</Text>
+        <Text className="text-[13px] font-semibold text-slate-400">{mentions.length} mentions</Text>
+      </View>
+
+      {visible.map((mention, index) => {
+        const fromPlace = mention.source_type === 'space';
+        const name = fromPlace ? spaceName : getDisplayName(mention.profile);
+        const authorId = mention.profile?.user_id;
+        return (
+          <View key={mention.id} className={`py-3 ${index > 0 ? 'border-t border-slate-100' : ''}`}>
+            <TouchableOpacity
+              disabled={!authorId}
+              onPress={() => authorId && openProfile(authorId, userId)}
+              activeOpacity={0.7}
+              className="flex-row items-center"
+            >
+              <Avatar name={name} size={28} />
+              <View className="flex-1 ml-2.5">
+                <Text className="text-[14px] font-bold text-ink" numberOfLines={1}>
+                  {fromPlace ? 'From the place description' : name}
+                </Text>
+                <Text className="text-[12px] text-slate-400">
+                  {formatTimeAgo(mention.source_created_at)}
+                  {` · says ${formatEventWhen(mention)}`}
+                </Text>
+              </View>
+            </TouchableOpacity>
+            <Text className="text-[15px] text-slate-600 italic leading-[22px] mt-2">“{mention.snippet}”</Text>
+            {mention.link_url && (
+              <TouchableOpacity onPress={() => openExternalUrl(mention.link_url)} className="flex-row items-center mt-1.5" activeOpacity={0.7}>
+                <ExternalLink size={12} color={colors.primary} />
+                <Text className="text-[13px] font-semibold text-primary ml-1">{linkLabel(mention.link_url)}</Text>
+              </TouchableOpacity>
+            )}
+          </View>
+        );
+      })}
+
+      {mentions.length > MENTIONS_PREVIEW && (
+        <TouchableOpacity onPress={() => setExpanded((value) => !value)} className="pt-2 items-center" activeOpacity={0.7}>
+          <Text className="text-primary font-semibold">{expanded ? 'Show fewer' : `Show ${hidden} more`}</Text>
+        </TouchableOpacity>
+      )}
+    </View>
+  );
+}
+
 export default function EventDetailScreen() {
   const params = useLocalSearchParams<{ id: string; token?: string | string[]; date?: string | string[] }>();
   const eventId = firstParam(params.id) || '';
@@ -176,12 +243,15 @@ export default function EventDetailScreen() {
   const [event, setEvent] = useState<SpaceEvent | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
+  const [mentions, setMentions] = useState<EventMention[]>([]);
   const phase = usePhase(event);
 
   const load = useCallback(async () => {
     if (!eventId) return;
     try {
-      setEvent(await getEvent(eventId, userId, token, date));
+      const loaded = await getEvent(eventId, userId, token, date);
+      setEvent(loaded);
+      setMentions(loaded ? await listEventMentions(loaded) : []);
     } catch {
       Alert.alert('Event', 'Could not load this hangout.');
     } finally {
@@ -282,7 +352,8 @@ export default function EventDetailScreen() {
   const chatClosesLabel = event.occurrence_date
     ? getChatClosesAt(event.occurrence_date).toLocaleDateString(undefined, { weekday: 'long' })
     : undefined;
-  const mentionCount = event.mention_count || 1;
+  const mentionCount = Math.max(event.mention_count || 1, mentions.length);
+  const showMentions = !hosted && mentions.length > 1;
 
   return (
     <SafeAreaView edges={['bottom']} className="flex-1 bg-slate-50">
@@ -340,7 +411,7 @@ export default function EventDetailScreen() {
             {hosted && event.description && (
               <Text className="text-[15px] text-slate-700 leading-[22px]">{event.description}</Text>
             )}
-            {!hosted && (
+            {!hosted && !showMentions && (
               <Text className="text-[15px] text-slate-600 italic leading-[22px]">“{event.snippet}”</Text>
             )}
           </View>
@@ -502,6 +573,8 @@ export default function EventDetailScreen() {
             </TouchableOpacity>
           )}
         </View>
+
+        {showMentions && <EventMentions mentions={mentions} spaceName={event.space.name} userId={userId} />}
 
         {!hosted && (
           <View className="flex-row items-center mt-4 px-1">

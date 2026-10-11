@@ -11,6 +11,7 @@ import {
   type EventKind,
   type EventSourceType,
   type EventTheme,
+  type EventMention,
   type EventMessage,
   type EventVisibility,
   type FeedActivity,
@@ -2400,6 +2401,62 @@ export async function listSpaceEvents(spaceId: string, viewerId?: string): Promi
     .filter((event) => canShowInLists(event, viewerId, true, true))
     .sort((first, second) => (first.occurrence_date || '9999').localeCompare(second.occurrence_date || '9999')
       || (first.start_time || '99:99').localeCompare(second.start_time || '99:99'));
+}
+
+const toMention = (event: SpaceEvent): EventMention => ({
+  id: event.id,
+  source_type: event.source_type,
+  snippet: event.snippet,
+  kind: event.kind,
+  event_date: event.event_date,
+  weekday: event.weekday,
+  start_time: event.start_time,
+  link_url: event.link_url,
+  source_created_at: event.source_created_at,
+  profile: event.profile,
+});
+
+/** Every review/description in the event's series, with the one being shown first and the rest newest first. */
+export async function listEventMentions(event: SpaceEvent): Promise<EventMention[]> {
+  if (event.source_type === 'hosted') return [];
+  const series = eventSeriesId(event);
+  let mentions: EventMention[] = [];
+
+  if (!isLocalEventId(event.id) && supabase) {
+    const { data, error } = await supabase
+      .from('space_events')
+      .select('id, source_type, source_user_id, snippet, kind, event_date, weekday, start_time, link_url, source_created_at')
+      .eq('series_id', series)
+      .neq('source_type', 'hosted')
+      .limit(50);
+    if (error) {
+      console.warn('Could not load other mentions:', error.message);
+    } else if (data) {
+      const rows = data as Record<string, unknown>[];
+      const profiles = await fetchProfilesByUserId(rows.map((row) => row.source_user_id).filter(Boolean).map(String));
+      mentions = rows.map((row) => ({
+        id: String(row.id),
+        source_type: row.source_type as EventMention['source_type'],
+        snippet: String(row.snippet),
+        kind: row.kind as EventMention['kind'],
+        event_date: (row.event_date as string | null) || undefined,
+        weekday: (row.weekday as number | null) ?? undefined,
+        start_time: (row.start_time as string | null) || undefined,
+        link_url: (row.link_url as string | null) || undefined,
+        source_created_at: String(row.source_created_at),
+        profile: row.source_user_id ? profiles[String(row.source_user_id)] : undefined,
+      }));
+    }
+  } else {
+    mentions = getLocalEvents()
+      .filter((candidate) => candidate.source_type !== 'hosted' && eventSeriesId(candidate) === series)
+      .map(toMention);
+  }
+
+  const others = mentions
+    .filter((mention) => mention.id !== event.id)
+    .sort((first, second) => second.source_created_at.localeCompare(first.source_created_at));
+  return [toMention(event), ...others];
 }
 
 const mapMessageRow = (row: Record<string, unknown>, profiles: Record<string, Profile>): EventMessage => ({

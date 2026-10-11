@@ -543,6 +543,20 @@ export interface SpaceEvent {
 
 export type RsvpStatus = 'going' | 'not_going';
 
+/** One review or place description that mentions an event. */
+export interface EventMention {
+  id: string;
+  source_type: EventSourceType;
+  snippet: string;
+  kind: EventKind;
+  event_date?: string;
+  weekday?: number;
+  start_time?: string;
+  link_url?: string;
+  source_created_at: string;
+  profile?: Profile;
+}
+
 export interface EventMessage {
   id: string;
   event_id: string;
