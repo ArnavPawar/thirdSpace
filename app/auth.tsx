@@ -4,11 +4,11 @@ import { router, useLocalSearchParams } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import * as AppleAuthentication from 'expo-apple-authentication';
 import { PrimaryButton } from '@/components/ui';
-import { isAppleSignInAvailable, useAuth, type OAuthProvider } from '@/lib/auth';
+import { completePasswordResetFromLink, isAppleSignInAvailable, useAuth, type OAuthProvider } from '@/lib/auth';
 import { isSupabaseConfigured } from '@/lib/supabase';
 import { colors } from '@/lib/theme';
 
-type PendingAction = 'sign-in' | 'sign-up' | 'apple' | OAuthProvider | null;
+type PendingAction = 'sign-in' | 'sign-up' | 'reset' | 'paste' | 'apple' | OAuthProvider | null;
 
 const PROVIDER_BUTTONS: { provider: OAuthProvider; label: string; mark: string; markColor: string; background: string; textColor: string; border?: string }[] = [
   { provider: 'google', label: 'Continue with Google', mark: 'G', markColor: '#4285F4', background: '#ffffff', textColor: colors.ink, border: '#e2e8f0' },
@@ -17,9 +17,11 @@ const PROVIDER_BUTTONS: { provider: OAuthProvider; label: string; mark: string; 
 
 export default function AuthScreen() {
   const { next } = useLocalSearchParams<{ next?: string | string[] }>();
-  const { signIn, signUp, signInWithApple, signInWithProvider } = useAuth();
+  const { signIn, signUp, requestPasswordReset, resendConfirmation, signInWithApple, signInWithProvider } = useAuth();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [resetLink, setResetLink] = useState('');
+  const [resetSentTo, setResetSentTo] = useState<string | null>(null);
   const [pending, setPending] = useState<PendingAction>(null);
   const [appleAvailable, setAppleAvailable] = useState(false);
 
@@ -68,7 +70,73 @@ export default function AuthScreen() {
       }
       finish();
     } catch (error) {
-      Alert.alert('Authentication Error', error instanceof Error ? error.message : 'Please try again.');
+      const message = error instanceof Error ? error.message : 'Please try again.';
+      if (mode === 'sign-in' && /email not confirmed/i.test(message)) {
+        Alert.alert(
+          'Confirm your email',
+          'This account has to be confirmed before the password will work. Send the confirmation email again?',
+          [
+            { text: 'Not now', style: 'cancel' },
+            {
+              text: 'Resend email',
+              onPress: () => {
+                resendConfirmation(email.trim())
+                  .then(() => Alert.alert('Email sent', 'Open the confirmation link in that email, then come back and sign in.'))
+                  .catch((resendError: unknown) => {
+                    Alert.alert('Could not resend', resendError instanceof Error ? resendError.message : 'Please try again.');
+                  });
+              },
+            },
+          ],
+        );
+        return;
+      }
+      Alert.alert('Authentication Error', message);
+    } finally {
+      setPending(null);
+    }
+  };
+
+  const handleForgotPassword = async () => {
+    if (!isSupabaseConfigured) {
+      Alert.alert('Not configured', 'Add your Supabase URL and anon key to .env to enable sign-in.');
+      return;
+    }
+
+    const trimmed = email.trim();
+    if (!trimmed.includes('@')) {
+      Alert.alert('Enter your email', 'Type the email for the account, then tap Forgot password.');
+      return;
+    }
+
+    setPending('reset');
+    try {
+      await requestPasswordReset(trimmed);
+      setResetSentTo(trimmed);
+      setResetLink('');
+      Alert.alert(
+        'Check your email',
+        `A reset link is on its way to ${trimmed}. Copy that link and paste it below. Tapping it in Mail tries to open the app and fails.`,
+      );
+    } catch (error) {
+      Alert.alert('Could not send reset email', error instanceof Error ? error.message : 'Please try again.');
+    } finally {
+      setPending(null);
+    }
+  };
+
+  const handlePastedResetLink = async () => {
+    if (!resetLink.trim()) {
+      Alert.alert('Paste the link', 'Copy the reset link from the email and paste it here.');
+      return;
+    }
+
+    setPending('paste');
+    try {
+      await completePasswordResetFromLink(resetLink);
+      router.replace('/auth/reset' as never);
+    } catch (error) {
+      Alert.alert('Could not use that link', error instanceof Error ? error.message : 'Send a new reset email and paste the new link.');
     } finally {
       setPending(null);
     }
@@ -152,8 +220,45 @@ export default function AuthScreen() {
             placeholderTextColor={colors.subtle}
             secureTextEntry
             autoComplete="password"
-            className="bg-white border border-slate-200 rounded-2xl px-4 h-[52px] mb-5 text-base text-ink"
+            className="bg-white border border-slate-200 rounded-2xl px-4 h-[52px] mb-2 text-base text-ink"
           />
+          <TouchableOpacity
+            onPress={handleForgotPassword}
+            disabled={pending !== null}
+            accessibilityRole="button"
+            className="self-end mb-5 py-2"
+          >
+            {pending === 'reset' ? (
+              <ActivityIndicator color={colors.primary} />
+            ) : (
+              <Text className="text-primary font-semibold text-sm">Forgot password?</Text>
+            )}
+          </TouchableOpacity>
+
+          {resetSentTo && (
+            <View className="bg-white border border-slate-200 rounded-2xl p-4 mb-5">
+              <Text className="text-[15px] font-bold text-ink">Paste the reset link</Text>
+              <Text className="text-[13px] text-slate-500 mt-1 mb-3 leading-5">
+                Copy the link from the email to {resetSentTo}. Leave the link untapped. Opening it uses it up, and Mail cannot hand it to the app.
+              </Text>
+              <TextInput
+                value={resetLink}
+                onChangeText={setResetLink}
+                placeholder="Paste the reset link"
+                placeholderTextColor={colors.subtle}
+                autoCapitalize="none"
+                autoCorrect={false}
+                multiline
+                className="bg-slate-50 border border-slate-200 rounded-xl px-3 py-3 mb-3 text-[13px] text-ink min-h-[72px]"
+              />
+              <PrimaryButton
+                label="Continue"
+                onPress={handlePastedResetLink}
+                loading={pending === 'paste'}
+                disabled={pending !== null}
+              />
+            </View>
+          )}
 
           <PrimaryButton
             label="Sign in"
