@@ -15,8 +15,8 @@ import { router, Stack, useLocalSearchParams } from 'expo-router';
 import { Lock, Send } from 'lucide-react-native';
 import { Avatar, EmptyState } from '@/components/ui';
 import { useAuth } from '@/lib/auth';
-import { canUseEventChat, getEvent, listEventMessages, sendEventMessage, subscribeToEventMessages } from '@/lib/data';
-import { formatEventWhen, getChatClosesAt } from '@/lib/events';
+import { canUseEventChat, canUseHereChat, getEvent, listEventMessages, listHereMessages, sendEventMessage, sendHereMessage, subscribeToEventMessages, subscribeToHereMessages } from '@/lib/data';
+import { formatEventWhen, getChatClosesAt, getEventPhase } from '@/lib/events';
 import { getDisplayName } from '@/lib/format';
 import { openEvent } from '@/lib/links';
 import { colors } from '@/lib/theme';
@@ -35,10 +35,11 @@ function mergeMessage(messages: EventMessage[], next: EventMessage) {
 }
 
 export default function EventChatScreen() {
-  const params = useLocalSearchParams<{ id: string; token?: string | string[]; date?: string | string[] }>();
+  const params = useLocalSearchParams<{ id: string; token?: string | string[]; date?: string | string[]; kind?: string | string[] }>();
   const eventId = firstParam(params.id) || '';
   const token = firstParam(params.token);
   const date = firstParam(params.date);
+  const hereChat = firstParam(params.kind) === 'here';
   const insets = useSafeAreaInsets();
   const { userId } = useAuth();
   const [event, setEvent] = useState<SpaceEvent | null>(null);
@@ -49,21 +50,24 @@ export default function EventChatScreen() {
   const listRef = useRef<FlatList<EventMessage>>(null);
 
   const occurrence = event?.occurrence_date;
-  const canChat = Boolean(event && canUseEventChat(event, userId));
+  const canChat = Boolean(event && (hereChat ? canUseHereChat(event, userId) : canUseEventChat(event, userId)));
 
   const load = useCallback(async () => {
     try {
       const loaded = await getEvent(eventId, userId, token, date);
       setEvent(loaded);
-      if (loaded?.occurrence_date && canUseEventChat(loaded, userId)) {
-        setMessages(await listEventMessages(loaded, loaded.occurrence_date));
+      const allowed = loaded?.occurrence_date && (hereChat ? canUseHereChat(loaded, userId) : canUseEventChat(loaded, userId));
+      if (loaded?.occurrence_date && allowed) {
+        setMessages(hereChat ? await listHereMessages(loaded, loaded.occurrence_date) : await listEventMessages(loaded, loaded.occurrence_date));
+      } else {
+        setMessages([]);
       }
     } catch (error) {
       Alert.alert('Group chat', error instanceof Error ? error.message : 'Could not load the chat.');
     } finally {
       setIsLoading(false);
     }
-  }, [date, eventId, token, userId]);
+  }, [date, eventId, hereChat, token, userId]);
 
   useEffect(() => {
     load();
@@ -71,16 +75,17 @@ export default function EventChatScreen() {
 
   useEffect(() => {
     if (!event || !occurrence || !canChat) return undefined;
-    return subscribeToEventMessages(event, occurrence, (message) => {
+    const subscribe = hereChat ? subscribeToHereMessages : subscribeToEventMessages;
+    return subscribe(event, occurrence, (message) => {
       setMessages((current) => mergeMessage(current, message));
     });
-  }, [canChat, event, occurrence]);
+  }, [canChat, event, hereChat, occurrence]);
 
   const send = async () => {
     if (!event || !draft.trim()) return;
     setIsSending(true);
     try {
-      const message = await sendEventMessage(userId, event, draft);
+      const message = hereChat ? await sendHereMessage(userId, event, draft) : await sendEventMessage(userId, event, draft);
       setDraft('');
       setMessages((current) => mergeMessage(current, message));
     } catch (error) {
@@ -99,12 +104,17 @@ export default function EventChatScreen() {
   }
 
   if (!event || !occurrence || !canChat) {
+    const ended = Boolean(event && occurrence && hereChat && getEventPhase(event, occurrence) !== 'live');
     return (
       <SafeAreaView edges={['bottom']} className="flex-1 bg-slate-50 justify-center px-5">
         <EmptyState
           icon={Lock}
-          title="This chat is for people going"
-          body="RSVP to the hangout to join. Chats disappear the day after the event."
+          title={ended ? 'This chat is gone' : hereChat ? 'Check in to join' : 'This chat is for people going'}
+          body={ended
+            ? 'The here chat deletes when the hangout ends.'
+            : hereChat
+              ? 'Tap I\'m here on the hangout. Only people who are there can talk, and the chat disappears when it ends.'
+              : 'RSVP to the hangout to join. Chats disappear the day after the event.'}
           actionLabel={event ? 'Back to the hangout' : undefined}
           onAction={event ? () => router.back() : undefined}
         />
@@ -131,7 +141,9 @@ export default function EventChatScreen() {
           <Text className="text-[12px] text-slate-500 mt-0.5" numberOfLines={1}>
             {formatEventWhen({ ...event, kind: 'one_time' }, occurrence)} · {event.going_count} going
           </Text>
-          <Text className="text-[12px] text-slate-400 mt-1">This chat disappears on {closesAt}.</Text>
+          <Text className="text-[12px] text-slate-400 mt-1">
+            {hereChat ? 'Only people checked in. This chat deletes when the hangout ends.' : `This chat disappears on ${closesAt}.`}
+          </Text>
         </TouchableOpacity>
 
         <FlatList
@@ -181,7 +193,7 @@ export default function EventChatScreen() {
           <TextInput
             value={draft}
             onChangeText={setDraft}
-            placeholder="Message the group"
+            placeholder={hereChat ? 'Message everyone here' : 'Message the group'}
             placeholderTextColor={colors.subtle}
             multiline
             maxLength={MAX_EVENT_MESSAGE_LENGTH}

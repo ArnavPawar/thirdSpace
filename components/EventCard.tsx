@@ -1,12 +1,13 @@
-import React from 'react';
-import { Pressable, Text, TouchableOpacity, View } from 'react-native';
+import React, { useState } from 'react';
+import { Alert, Pressable, Text, TouchableOpacity, View } from 'react-native';
 import * as WebBrowser from 'expo-web-browser';
 import { Clock, ExternalLink, MapPin, Repeat, Users } from 'lucide-react-native';
 import GoingFaces from '@/components/GoingFaces';
+import PeopleListSheet from '@/components/PeopleListSheet';
 import { useAuth } from '@/lib/auth';
 import { formatEventTime, getEventPhase, isHostedEvent, parseDateKey, WEEKDAY_NAMES } from '@/lib/events';
 import { formatDistance, getDisplayName } from '@/lib/format';
-import { openEvent } from '@/lib/links';
+import { openDirectMessage, openEvent, openHereChat } from '@/lib/links';
 import { CATEGORY_META, colors } from '@/lib/theme';
 import type { CalendarOccurrence } from '@/types/space';
 
@@ -17,6 +18,8 @@ interface EventCardProps {
 
 export default function EventCard({ occurrence, showRecurrence = false }: EventCardProps) {
   const { userId } = useAuth();
+  const [showGoing, setShowGoing] = useState(false);
+  const [showHere, setShowHere] = useState(false);
   const { event, distance, mention_count: mentionCount } = occurrence;
   const hosted = isHostedEvent(event);
   const meta = CATEGORY_META[event.space.category];
@@ -40,6 +43,7 @@ export default function EventCard({ occurrence, showRecurrence = false }: EventC
   };
 
   return (
+    <>
     <Pressable
       onPress={() => openEvent(event.id, undefined, occurrence.date)}
       accessibilityRole="button"
@@ -66,12 +70,19 @@ export default function EventCard({ occurrence, showRecurrence = false }: EventC
         <View className="flex-row items-center">
           <Text numberOfLines={1} className="text-[16px] font-extrabold text-ink flex-shrink">{event.title}</Text>
           {isLive && (
-            <View className="flex-row items-center bg-emerald-50 rounded-full px-2 py-0.5 ml-2">
+            <TouchableOpacity
+              onPress={() => event.here.length > 0 && setShowHere(true)}
+              disabled={event.here.length === 0}
+              hitSlop={6}
+              accessibilityRole="button"
+              accessibilityLabel={event.here_count > 0 ? `See who is here, ${event.here_count} here` : 'Live'}
+              className="flex-row items-center bg-emerald-50 rounded-full px-2 py-0.5 ml-2"
+            >
               <View style={{ backgroundColor: colors.success }} className="w-1.5 h-1.5 rounded-full" />
               <Text className="text-[10px] font-bold text-emerald-700 ml-1">
                 {event.here_count > 0 ? `Live · ${event.here_count} here` : 'Live'}
               </Text>
-            </View>
+            </TouchableOpacity>
           )}
           {isEnded && (
             <View className="rounded-full px-2 py-0.5 ml-2 bg-slate-100">
@@ -126,7 +137,17 @@ export default function EventCard({ occurrence, showRecurrence = false }: EventC
                 <View className="ml-2">
                   <Users size={12} color={colors.muted} />
                 </View>
-                <Text className="text-[12px] font-semibold text-slate-500 ml-1">{event.capacity && !isEnded ? `${event.going_count}/${event.capacity}` : event.going_count} {goingLabel}</Text>
+                <TouchableOpacity
+                  onPress={() => event.going.length > 0 && setShowGoing(true)}
+                  disabled={event.going.length === 0}
+                  hitSlop={8}
+                  accessibilityRole="button"
+                  accessibilityLabel={`See who is ${goingLabel}`}
+                >
+                  <Text className="text-[12px] font-semibold text-slate-500 ml-1">
+                    {event.capacity && !isEnded ? `${event.going_count}/${event.capacity}` : event.going_count} {goingLabel}
+                  </Text>
+                </TouchableOpacity>
               </>
             ) : (
               <Text numberOfLines={1} className="text-[11px] font-semibold text-slate-400 flex-shrink">
@@ -153,5 +174,38 @@ export default function EventCard({ occurrence, showRecurrence = false }: EventC
         </View>
       </View>
     </Pressable>
+    <PeopleListSheet
+      visible={showGoing}
+      title={`${event.going_count} ${goingLabel}`}
+      people={event.going}
+      currentUserId={userId}
+      onClose={() => setShowGoing(false)}
+      onMessage={(person) => {
+        setShowGoing(false);
+        openDirectMessage(person.user_id);
+      }}
+    />
+    <PeopleListSheet
+      visible={showHere}
+      title={`${event.here_count} here now`}
+      people={event.here}
+      currentUserId={userId}
+      onClose={() => setShowHere(false)}
+      actionLabel={isLive ? 'Chat with everyone here' : undefined}
+      actionHint="Only people who checked in. This chat deletes when the hangout ends."
+      onAction={isLive ? () => {
+        setShowHere(false);
+        if (!event.viewer_here) {
+          Alert.alert('Check in first', 'Open the hangout and tap I\'m here to join this chat.');
+          return;
+        }
+        openHereChat(event.id, event.visibility === 'private' ? event.invite_token : undefined, occurrence.date);
+      } : undefined}
+      onMessage={(person) => {
+        setShowHere(false);
+        openDirectMessage(person.user_id);
+      }}
+    />
+    </>
   );
 }

@@ -9,12 +9,14 @@ import {
   KeyRound,
   LogIn,
   MapPin,
+  MessageCircle,
   Medal,
   Save,
   Settings,
   TrendingUp,
   UserCheck,
   UserPlus,
+  Users,
   X,
 } from 'lucide-react-native';
 import SpaceCard from '@/components/SpaceCard';
@@ -23,11 +25,14 @@ import { Avatar, EmptyState, IconButton, ProgressBar, ScorePill, ScreenHeader, S
 import { demoUserLabel, useAuth } from '@/lib/auth';
 import {
   getProfile,
+  listIncomingInvites,
   listIncomingSecretRequests,
   listSecretSpots,
   listSocialProfiles,
   listUserRankings,
   listUserRatingHistory,
+  respondToEventInvite,
+  respondToGroupInvite,
   respondToSecretRequest,
   setVibeTitle,
   toggleFavorite,
@@ -35,7 +40,7 @@ import {
   updateProfile,
 } from '@/lib/data';
 import { getDisplayName } from '@/lib/format';
-import { openProfile } from '@/lib/links';
+import { openEvent, openProfile } from '@/lib/links';
 import { CATEGORY_META, colors } from '@/lib/theme';
 import type {
   CategoryPurpose,
@@ -43,6 +48,7 @@ import type {
   ProfileWithStats,
   RatingHistoryEntry,
   SecretSpotPreview,
+  IncomingInvite,
   SecretSpotRequest,
   SpaceWithAttributes,
   UserRanking,
@@ -59,6 +65,7 @@ export default function ProfileScreen() {
   const [history, setHistory] = useState<RatingHistoryEntry[]>([]);
   const [secretSpots, setSecretSpots] = useState<SecretSpotPreview[]>([]);
   const [secretRequests, setSecretRequests] = useState<SecretSpotRequest[]>([]);
+  const [invites, setInvites] = useState<IncomingInvite[]>([]);
   const [activeTab, setActiveTab] = useState<ProfileTab>('rankings');
   const [selectedPurpose, setSelectedPurpose] = useState<CategoryPurpose | 'All'>('All');
   const [socialModalType, setSocialModalType] = useState<'followers' | 'following' | null>(null);
@@ -71,18 +78,20 @@ export default function ProfileScreen() {
 
   const loadProfile = useCallback(async () => {
     try {
-      const [profileResult, rankingResult, historyResult, secretResult, requestResult] = await Promise.all([
+      const [profileResult, rankingResult, historyResult, secretResult, requestResult, inviteResult] = await Promise.all([
         getProfile(userId),
         listUserRankings(userId),
         listUserRatingHistory(userId),
         listSecretSpots(userId),
         listIncomingSecretRequests(userId),
+        listIncomingInvites(userId).catch(() => [] as IncomingInvite[]),
       ]);
       setProfile(profileResult);
       setRankings(rankingResult);
       setHistory(historyResult);
       setSecretSpots(secretResult);
       setSecretRequests(requestResult);
+      setInvites(inviteResult);
       setProfileDraft({
         full_name: profileResult.full_name || '',
         username: profileResult.username || '',
@@ -170,6 +179,22 @@ export default function ProfileScreen() {
     }
   };
 
+  const handleInvite = async (invite: IncomingInvite, accept: boolean) => {
+    setInvites((items) => items.filter((item) => item !== invite));
+    try {
+      if (invite.kind === 'group' && invite.group) {
+        await respondToGroupInvite(userId, invite.group.id, accept ? 'accepted' : 'declined');
+        if (accept) router.push(`/groups/${invite.group.id}` as never);
+      } else if (invite.event) {
+        await respondToEventInvite(userId, invite.event.id, accept ? 'accepted' : 'declined');
+        if (accept) openEvent(invite.event.id, invite.event.visibility === 'private' ? invite.event.invite_token : undefined);
+      }
+    } catch {
+      loadProfile();
+      Alert.alert('Invite', 'Could not update that invite.');
+    }
+  };
+
   const handleRespond = async (request: SecretSpotRequest, accept: boolean) => {
     setSecretRequests((items) => items.filter((item) => item.id !== request.id));
     try {
@@ -245,6 +270,54 @@ export default function ProfileScreen() {
             ))}
           </View>
         </View>
+
+        <TouchableOpacity
+          onPress={() => router.push('/groups' as never)}
+          activeOpacity={0.85}
+          className="mx-4 mt-3 bg-white border border-slate-200 rounded-2xl px-4 py-3 flex-row items-center"
+        >
+          <Users size={18} color={colors.primary} />
+          <Text className="font-semibold text-ink flex-1 ml-3">Your groups</Text>
+          <ChevronRight size={16} color={colors.subtle} />
+        </TouchableOpacity>
+
+        <TouchableOpacity
+          onPress={() => router.push('/chats' as never)}
+          activeOpacity={0.85}
+          className="mx-4 mt-3 bg-white border border-slate-200 rounded-2xl px-4 py-3 flex-row items-center"
+        >
+          <MessageCircle size={18} color={colors.primary} />
+          <Text className="font-semibold text-ink flex-1 ml-3">Chats</Text>
+          <ChevronRight size={16} color={colors.subtle} />
+        </TouchableOpacity>
+
+        {invites.length > 0 && (
+          <View className="mx-4 mt-3">
+            <Text className="text-[13px] font-bold text-slate-400 uppercase tracking-wider mb-2">Invites</Text>
+            {invites.map((invite) => {
+              const label = invite.kind === 'group'
+                ? invite.group?.name || 'A group'
+                : invite.event?.title || 'A hangout';
+              const from = getDisplayName(invite.invited_by);
+              return (
+                <View key={`${invite.kind}-${invite.kind === 'group' ? invite.group?.id : invite.event?.id}`} className="bg-white border border-slate-200 rounded-2xl px-4 py-3 mb-2">
+                  <Text className="font-bold text-ink">{label}</Text>
+                  <Text className="text-[13px] text-slate-500 mt-0.5">
+                    {from} invited you to this {invite.kind === 'group' ? 'group' : 'hangout'}.
+                  </Text>
+                  <View className="flex-row gap-2 mt-3">
+                    <TouchableOpacity onPress={() => handleInvite(invite, true)} className="flex-1 h-10 rounded-xl bg-primary items-center justify-center">
+                      <Text className="text-white font-semibold">{invite.kind === 'group' ? 'Join' : 'Open'}</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity onPress={() => handleInvite(invite, false)} className="flex-1 h-10 rounded-xl bg-slate-100 items-center justify-center">
+                      <Text className="text-ink font-semibold">Decline</Text>
+                    </TouchableOpacity>
+                  </View>
+                </View>
+              );
+            })}
+          </View>
+        )}
 
         {isDemoMode && (
           <TouchableOpacity

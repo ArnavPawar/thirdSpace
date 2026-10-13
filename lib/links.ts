@@ -1,8 +1,9 @@
 import { Alert, Linking, Platform, Share } from 'react-native';
+import * as Clipboard from 'expo-clipboard';
 import * as ExpoLinking from 'expo-linking';
 import { router } from 'expo-router';
 import { isSupabaseConfigured } from '@/lib/supabase';
-import type { SpaceEvent, SpaceWithAttributes } from '@/types/space';
+import type { Group, SpaceEvent, SpaceWithAttributes } from '@/types/space';
 
 export function openProfile(profileUserId: string, currentUserId: string) {
   router.push((profileUserId === currentUserId ? '/profile' : `/user/${profileUserId}`) as never);
@@ -55,10 +56,11 @@ const eventQuery = (token?: string, date?: string) => {
   return query ? `?${query}` : '';
 };
 
-const eventParams = (eventId: string, token?: string, date?: string) => ({
+const eventParams = (eventId: string, token?: string, date?: string, kind?: string) => ({
   id: eventId,
   ...(token ? { token } : {}),
   ...(date ? { date } : {}),
+  ...(kind ? { kind } : {}),
 });
 
 export function eventHref(eventId: string, token?: string, date?: string) {
@@ -74,6 +76,14 @@ export function openEventChat(eventId: string, token?: string, date?: string) {
   router.push({ pathname: '/event/chat/[id]', params: eventParams(eventId, token, date) } as never);
 }
 
+export function openHereChat(eventId: string, token?: string, date?: string) {
+  router.push({ pathname: '/event/chat/[id]', params: eventParams(eventId, token, date, 'here') } as never);
+}
+
+export function openDirectMessage(userId: string) {
+  router.push({ pathname: '/messages/[id]', params: { id: userId } } as never);
+}
+
 export function eventShareUrl(event: Pick<SpaceEvent, 'id' | 'visibility' | 'invite_token'>) {
   const token = event.visibility === 'private' ? event.invite_token : undefined;
   return ExpoLinking.createURL(`event/${event.id}`, token ? { queryParams: { token } } : undefined);
@@ -85,6 +95,35 @@ export async function shareEvent(event: Pick<SpaceEvent, 'id' | 'title' | 'visib
     title: event.title,
     message: `${event.title} at ${event.space.name}\n${url}`,
   });
+}
+
+export function groupHref(groupId: string, token?: string) {
+  return token ? `/groups/${groupId}?token=${encodeURIComponent(token)}` : `/groups/${groupId}`;
+}
+
+export function openGroup(groupId: string, token?: string) {
+  router.push({
+    pathname: '/groups/[id]',
+    params: token ? { id: groupId, token } : { id: groupId },
+  } as never);
+}
+
+export function groupShareUrl(group: Pick<Group, 'id' | 'visibility' | 'invite_token'>) {
+  const token = group.visibility === 'private' ? group.invite_token : undefined;
+  return ExpoLinking.createURL(`groups/${group.id}`, token ? { queryParams: { token } } : undefined);
+}
+
+export async function shareGroup(group: Pick<Group, 'id' | 'name' | 'visibility' | 'invite_token'>) {
+  const url = groupShareUrl(group);
+  await Share.share({
+    title: group.name,
+    message: `Join ${group.name} on 3rdSpace\n${url}`,
+  });
+}
+
+export async function copyInviteLink(url: string) {
+  await Clipboard.setStringAsync(url);
+  Alert.alert('Link copied', 'Send it to anyone you want to invite.');
 }
 
 export function requireSignedIn(hasUser: boolean, next: string, message: string) {
