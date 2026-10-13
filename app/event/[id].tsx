@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { ActivityIndicator, Alert, ScrollView, Text, TouchableOpacity, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router, useFocusEffect, useLocalSearchParams } from 'expo-router';
@@ -7,6 +7,7 @@ import {
   CalendarDays,
   Check,
   ChevronRight,
+  Copy,
   ExternalLink,
   History,
   Lock,
@@ -19,6 +20,8 @@ import {
 } from 'lucide-react-native';
 import { EventPoster, ThemePicker } from '@/components/EventPoster';
 import GoingFaces from '@/components/GoingFaces';
+import InviteSheet from '@/components/InviteSheet';
+import PeopleListSheet from '@/components/PeopleListSheet';
 import { Avatar, CategoryIcon, EmptyState } from '@/components/ui';
 import { useAuth } from '@/lib/auth';
 import {
@@ -26,6 +29,9 @@ import {
   canUseEventChat,
   getEvent,
   listEventMentions,
+  listOutgoingInvites,
+  listSocialProfiles,
+  sendEventInvite,
   setEventCheckin,
   setEventRsvp,
   updateHostedEventTheme,
@@ -41,9 +47,9 @@ import {
   type EventPhase,
 } from '@/lib/events';
 import { formatTimeAgo, getDisplayName } from '@/lib/format';
-import { eventHref, openEventChat, openExternalUrl, openProfile, requireSignedIn, shareEvent } from '@/lib/links';
+import { copyInviteLink, eventHref, eventShareUrl, openDirectMessage, openEventChat, openExternalUrl, openHereChat, openProfile, requireSignedIn, shareEvent } from '@/lib/links';
 import { CATEGORY_META, colors } from '@/lib/theme';
-import type { EventMention, EventTheme, RsvpStatus, SpaceEvent } from '@/types/space';
+import type { EventMention, EventTheme, InviteStatus, Profile, RsvpStatus, SpaceEvent } from '@/types/space';
 
 const firstParam = (value?: string | string[]) => (Array.isArray(value) ? value[0] : value);
 
@@ -235,15 +241,23 @@ function EventMentions({ mentions, spaceName, userId }: { mentions: EventMention
 }
 
 export default function EventDetailScreen() {
-  const params = useLocalSearchParams<{ id: string; token?: string | string[]; date?: string | string[] }>();
+  const params = useLocalSearchParams<{ id: string; token?: string | string[]; date?: string | string[]; invite?: string | string[] }>();
   const eventId = firstParam(params.id) || '';
   const token = firstParam(params.token);
   const date = firstParam(params.date);
+  const inviteParam = firstParam(params.invite);
   const { user, userId } = useAuth();
   const [event, setEvent] = useState<SpaceEvent | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
   const [mentions, setMentions] = useState<EventMention[]>([]);
+  const [showInvite, setShowInvite] = useState(false);
+  const [showGoing, setShowGoing] = useState(false);
+  const [showHere, setShowHere] = useState(false);
+  const [invitePeople, setInvitePeople] = useState<Profile[]>([]);
+  const [invited, setInvited] = useState<Record<string, InviteStatus>>({});
+  const [inviteLoading, setInviteLoading] = useState(false);
+  const openedInvite = useRef(false);
   const phase = usePhase(event);
 
   const load = useCallback(async () => {
@@ -309,6 +323,46 @@ export default function EventDetailScreen() {
       },
     ]);
   };
+
+  const openInvites = async () => {
+    if (!event) return;
+    setShowInvite(true);
+    setInviteLoading(true);
+    try {
+      const [following, statuses] = await Promise.all([
+        listSocialProfiles('following', userId),
+        listOutgoingInvites('event', event.id, userId),
+      ]);
+      setInvitePeople(following);
+      setInvited(statuses);
+    } catch (error) {
+      Alert.alert('Invites', error instanceof Error ? error.message : 'Could not load people you follow.');
+    } finally {
+      setInviteLoading(false);
+    }
+  };
+
+  const invitePerson = async (inviteeId: string) => {
+    if (!event) return;
+    setInvited((current) => ({ ...current, [inviteeId]: 'pending' }));
+    try {
+      await sendEventInvite(userId, event.id, inviteeId);
+    } catch (error) {
+      setInvited((current) => {
+        const next = { ...current };
+        delete next[inviteeId];
+        return next;
+      });
+      Alert.alert('Invite', error instanceof Error ? error.message : 'Could not send that invite.');
+    }
+  };
+
+  useEffect(() => {
+    if (inviteParam !== '1' || !event || event.host_user_id !== userId || openedInvite.current) return;
+    openedInvite.current = true;
+    router.setParams({ invite: '' });
+    openInvites();
+  }, [event, inviteParam, userId]);
 
   if (isLoading) {
     return (
@@ -438,13 +492,21 @@ export default function EventDetailScreen() {
 
         {!event.cancelled_at && phase === 'live' && (
           <View style={{ borderColor: colors.success }} className="bg-white rounded-3xl border p-5 mt-3">
-            <View className="flex-row items-center">
+            <TouchableOpacity
+              onPress={() => event.here.length > 0 && setShowHere(true)}
+              disabled={event.here.length === 0}
+              activeOpacity={0.7}
+              accessibilityRole="button"
+              accessibilityLabel={`See who is here, ${event.here_count} here now`}
+              className="flex-row items-center"
+            >
               <View className="flex-row items-center bg-emerald-50 rounded-full px-2.5 py-1 mr-2">
                 <View style={{ backgroundColor: colors.success }} className="w-2 h-2 rounded-full" />
                 <Text className="text-[11px] font-bold text-emerald-700 uppercase ml-1.5">Live</Text>
               </View>
               <Text className="text-[17px] font-bold text-ink flex-1">{event.here_count} here now</Text>
-            </View>
+              {event.here.length > 0 && <ChevronRight size={18} color={colors.subtle} />}
+            </TouchableOpacity>
             {event.here.length > 0 ? (
               <View className="mt-3">
                 <GoingFaces people={event.here} currentUserId={userId} size={36} />
@@ -475,10 +537,18 @@ export default function EventDetailScreen() {
 
         {!event.cancelled_at && !ended && (
           <View className="bg-white rounded-3xl border border-slate-200 p-5 mt-3">
-            <View className="flex-row items-center">
+            <TouchableOpacity
+              onPress={() => event.going.length > 0 && setShowGoing(true)}
+              disabled={event.going.length === 0}
+              activeOpacity={0.7}
+              accessibilityRole="button"
+              accessibilityLabel={`See who is going, ${headcount}`}
+              className="flex-row items-center"
+            >
               <Users size={16} color={colors.primary} />
               <Text className="text-[17px] font-bold text-ink ml-2 flex-1">{headcount}</Text>
-            </View>
+              {event.going.length > 0 && <ChevronRight size={18} color={colors.subtle} />}
+            </TouchableOpacity>
             {event.kind === 'weekly' && event.occurrence_date && (
               <Text className="text-[13px] text-slate-500 mt-1">For {formatEventWhen({ ...event, kind: 'one_time' }, event.occurrence_date)}</Text>
             )}
@@ -557,13 +627,31 @@ export default function EventDetailScreen() {
 
         <View className="flex-row gap-2 mt-3">
           <TouchableOpacity
+            onPress={() => copyInviteLink(eventShareUrl(event))}
+            className="flex-1 h-12 rounded-2xl bg-white border border-slate-200 flex-row items-center justify-center"
+          >
+            <Copy size={16} color={colors.ink} />
+            <Text className="font-semibold text-ink ml-2">Copy link</Text>
+          </TouchableOpacity>
+          {isHost && (
+            <TouchableOpacity
+              onPress={openInvites}
+              className="flex-1 h-12 rounded-2xl bg-white border border-slate-200 flex-row items-center justify-center"
+            >
+              <Users size={16} color={colors.ink} />
+              <Text className="font-semibold text-ink ml-2">Invite</Text>
+            </TouchableOpacity>
+          )}
+          <TouchableOpacity
             onPress={() => shareEvent(event)}
             className="flex-1 h-12 rounded-2xl bg-white border border-slate-200 flex-row items-center justify-center"
           >
             <Share2 size={16} color={colors.ink} />
-            <Text className="font-semibold text-ink ml-2">{event.visibility === 'private' ? 'Share invite' : 'Share'}</Text>
+            <Text className="font-semibold text-ink ml-2">Share</Text>
           </TouchableOpacity>
-          {event.link_url && (
+        </View>
+        {event.link_url && (
+          <View className="mt-2">
             <TouchableOpacity
               onPress={() => openExternalUrl(event.link_url)}
               className="flex-1 h-12 rounded-2xl bg-primary flex-row items-center justify-center"
@@ -571,8 +659,8 @@ export default function EventDetailScreen() {
               <ExternalLink size={16} color="white" />
               <Text className="font-semibold text-white ml-2" numberOfLines={1}>{linkLabel(event.link_url)}</Text>
             </TouchableOpacity>
-          )}
-        </View>
+          </View>
+        )}
 
         {showMentions && <EventMentions mentions={mentions} spaceName={event.space.name} userId={userId} />}
 
@@ -589,6 +677,52 @@ export default function EventDetailScreen() {
           </TouchableOpacity>
         )}
       </ScrollView>
+      <PeopleListSheet
+        visible={showGoing}
+        title={headcount}
+        people={event.going}
+        currentUserId={userId}
+        onClose={() => setShowGoing(false)}
+        onMessage={(person) => {
+          setShowGoing(false);
+          openDirectMessage(person.user_id);
+        }}
+      />
+      <PeopleListSheet
+        visible={showHere}
+        title={`${event.here_count} here now`}
+        people={event.here}
+        currentUserId={userId}
+        onClose={() => setShowHere(false)}
+        actionLabel={phase === 'live' ? 'Chat with everyone here' : undefined}
+        actionHint="Only people who checked in. This chat deletes when the hangout ends."
+        onAction={phase === 'live' ? () => {
+          setShowHere(false);
+          if (!event.viewer_here) {
+            Alert.alert('Check in first', 'Tap I\'m here to join the chat with everyone who is there.');
+            return;
+          }
+          openHereChat(event.id, token, event.occurrence_date);
+        } : undefined}
+        onMessage={(person) => {
+          setShowHere(false);
+          openDirectMessage(person.user_id);
+        }}
+      />
+      {isHost && (
+        <InviteSheet
+          visible={showInvite}
+          title="Invite people"
+          url={eventShareUrl(event)}
+          people={invitePeople}
+          invited={invited}
+          loading={inviteLoading}
+          onClose={() => setShowInvite(false)}
+          onCopy={() => copyInviteLink(eventShareUrl(event))}
+          onShare={() => shareEvent(event)}
+          onInvite={invitePerson}
+        />
+      )}
     </SafeAreaView>
   );
 }

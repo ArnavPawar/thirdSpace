@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { Alert, KeyboardAvoidingView, Platform, ScrollView, Switch, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import DateTimePicker from '@react-native-community/datetimepicker';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -8,11 +8,11 @@ import { EventPoster, ThemePicker } from '@/components/EventPoster';
 import PlacePicker, { type PickedPlace } from '@/components/PlacePicker';
 import { Chip, PrimaryButton, SegmentedControl } from '@/components/ui';
 import { useAuth } from '@/lib/auth';
-import { createHostedEvent } from '@/lib/data';
+import { createHostedEvent, listMyGroups } from '@/lib/data';
 import { formatEventTime, parseDateKey, parseEventTime, toDateKey } from '@/lib/events';
-import { eventHref, requireSignedIn, shareEvent } from '@/lib/links';
+import { eventHref, requireSignedIn } from '@/lib/links';
 import { CATEGORY_META, colors } from '@/lib/theme';
-import { CATEGORY_CONFIG, SPACE_CATEGORIES, type EventTheme, type EventVisibility, type SpaceCategory, type ThirdSpace } from '@/types/space';
+import { CATEGORY_CONFIG, SPACE_CATEGORIES, type EventTheme, type EventVisibility, type Group, type SpaceCategory, type ThirdSpace } from '@/types/space';
 
 const defaultStart = () => {
   const date = new Date();
@@ -164,7 +164,13 @@ export default function NewEventScreen() {
   const [allowOverCapacity, setAllowOverCapacity] = useState(false);
   const [linkText, setLinkText] = useState('');
   const [notes, setNotes] = useState('');
+  const [groups, setGroups] = useState<Group[]>([]);
+  const [groupIds, setGroupIds] = useState<string[]>([]);
   const [isSubmitting, setIsSubmitting] = useState(false);
+
+  useEffect(() => {
+    listMyGroups(userId).then(setGroups).catch(() => setGroups([]));
+  }, [userId]);
 
   const secretPlace = Boolean(place?.space.is_secret);
   const effectiveVisibility: EventVisibility = secretPlace ? 'private' : visibility;
@@ -229,15 +235,10 @@ export default function NewEventScreen() {
         linkUrl,
         existingSpace: place.existing,
         space,
+        groupIds,
       });
-      if (created.visibility === 'private') {
-        try {
-          await shareEvent(created);
-        } catch {
-          // Sharing can be dismissed without failing the hangout.
-        }
-      }
-      router.replace(eventHref(created.id, created.visibility === 'private' ? created.invite_token : undefined) as never);
+      const href = eventHref(created.id, created.visibility === 'private' ? created.invite_token : undefined);
+      router.replace(`${href}${href.includes('?') ? '&' : '?'}invite=1` as never);
     } catch (error) {
       Alert.alert('Could not publish', error instanceof Error ? error.message : 'Please try again.');
     } finally {
@@ -326,9 +327,27 @@ export default function NewEventScreen() {
               <Text className="text-[13px] text-slate-500 mt-2">
                 {visibility === 'public'
                   ? 'Anyone nearby can see it on the calendar and map.'
-                  : 'Hidden from the public calendar and map. Share the link with the people you want.'}
+                  : 'Hidden from the public calendar and map. Invite a group, or send the link to specific people.'}
               </Text>
             </>
+          )}
+
+          <Text className="text-[13px] font-bold text-slate-400 uppercase tracking-wider mt-6 mb-2">Post to groups</Text>
+          {groups.length === 0 ? (
+            <Text className="text-[13px] text-slate-500">Groups you belong to show up here, so one hangout reaches the whole crew.</Text>
+          ) : (
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8 }}>
+              {groups.map((group) => (
+                <Chip
+                  key={group.id}
+                  label={group.name}
+                  selected={groupIds.includes(group.id)}
+                  onPress={() => setGroupIds((current) => current.includes(group.id)
+                    ? current.filter((id) => id !== group.id)
+                    : [...current, group.id])}
+                />
+              ))}
+            </ScrollView>
           )}
 
           <Text className="text-[13px] font-bold text-slate-400 uppercase tracking-wider mt-6 mb-2">Optional</Text>
@@ -376,7 +395,7 @@ export default function NewEventScreen() {
 
           <View className="mt-6">
             <PrimaryButton
-              label={effectiveVisibility === 'private' ? 'Create & share link' : 'Publish hangout'}
+              label="Publish hangout"
               onPress={publish}
               loading={isSubmitting}
               disabled={!title.trim() || !place}

@@ -6,7 +6,11 @@ import {
   sanitizeAttributeScores,
   type AttributeScores,
   type CalendarOccurrence,
+  type ChatThread,
+  type DirectMessage,
+  type DirectThread,
   type CategoryPurpose,
+  type CreateGroupInput,
   type CreateHostedEventInput,
   type EventKind,
   type EventSourceType,
@@ -15,6 +19,13 @@ import {
   type EventMessage,
   type EventVisibility,
   type FeedActivity,
+  type Group,
+  type GroupDetail,
+  type GroupMember,
+  type GroupRole,
+  type GroupVisibility,
+  type IncomingInvite,
+  type InviteStatus,
   MAX_EVENT_MESSAGE_LENGTH,
   type LocalPhoto,
   type Profile,
@@ -67,6 +78,7 @@ import {
   type EventSource,
 } from './events';
 import { ImageManipulator, SaveFormat } from 'expo-image-manipulator';
+import { getDisplayName } from './format';
 import { isSupabaseConfigured, supabase } from './supabase';
 
 type RankingWithSpace = UserRanking & { space: SpaceWithAttributes };
@@ -84,6 +96,33 @@ type FeedOptions = {
   currentUserId?: string;
   scope?: FeedScope;
   authorId?: string;
+  authorIds?: string[];
+};
+
+type StoredGroup = {
+  id: string;
+  name: string;
+  description?: string;
+  visibility: GroupVisibility;
+  invite_token: string;
+  created_by: string;
+  created_at: string;
+  updated_at: string;
+};
+
+type LocalMember = {
+  group_id: string;
+  user_id: string;
+  role: GroupRole;
+  created_at: string;
+};
+
+type LocalInvite = {
+  target_id: string;
+  invitee_user_id: string;
+  invited_by: string;
+  status: InviteStatus;
+  created_at: string;
 };
 
 const localState = {
@@ -93,6 +132,7 @@ const localState = {
   rankings: [...demoRankings],
   profiles: [...demoProfiles, ...demoCrowdProfiles],
   following: new Set(['user-mike', 'user-nina']),
+  followers: new Set(['user-mike', 'user-nina', 'user-emma']),
   secretAccess: new Set(demoSecretAccess),
   secretRequests: [...demoSecretRequests],
   sessionRatings: {} as Record<string, number>,
@@ -101,7 +141,15 @@ const localState = {
   rsvps: [] as RsvpRow[],
   checkins: [] as PresenceRow[],
   messages: [] as EventMessage[],
+  hereMessages: [] as EventMessage[],
+  directMessages: [] as DirectMessage[],
   photos: [...demoPhotos],
+  groups: null as StoredGroup[] | null,
+  groupMembers: [] as LocalMember[],
+  eventGroups: [] as { event_id: string; group_id: string }[],
+  groupSpots: [] as { group_id: string; space_id: string; added_by: string; created_at: string }[],
+  eventInvites: [] as LocalInvite[],
+  groupInvites: [] as LocalInvite[],
 };
 
 const PHOTO_BUCKET = 'review-photos';
@@ -330,9 +378,15 @@ export async function getSpaceDetails(spaceId: string, viewerId = demoCurrentUse
 export async function listRecentActivity(options: FeedOptions = {}): Promise<FeedActivity[]> {
   const scope = options.scope || 'public';
   const currentUserId = options.currentUserId || demoCurrentUserId;
-  const { authorId } = options;
-  const filterFeed = (feed: FeedActivity[]) =>
-    filterFeedByScope(authorId ? feed.filter((activity) => activity.user_id === authorId) : feed, scope);
+  const { authorId, authorIds } = options;
+  const filterFeed = (feed: FeedActivity[]) => {
+    let next = authorId ? feed.filter((activity) => activity.user_id === authorId) : feed;
+    if (authorIds) {
+      const allowed = new Set(authorIds);
+      next = next.filter((activity) => allowed.has(activity.user_id));
+    }
+    return filterFeedByScope(next, scope);
+  };
 
   if (!isSupabaseConfigured || !supabase) {
     return filterFeed(listRecentActivityFromDemo(currentUserId));
@@ -344,6 +398,11 @@ export async function listRecentActivity(options: FeedOptions = {}): Promise<Fee
     .order('created_at', { ascending: false })
     .limit(50);
   if (authorId && isUuid(authorId)) query = query.eq('user_id', authorId);
+  if (authorIds) {
+    const ids = authorIds.filter(isUuid);
+    if (ids.length === 0) return filterFeed(listRecentActivityFromDemo(currentUserId));
+    query = query.in('user_id', ids);
+  }
 
   const { data, error } = await query;
 
@@ -1734,6 +1793,7 @@ const canShowInLists = (event: SpaceEvent, viewerId: string | undefined, include
 
 const canReadEvent = (event: SpaceEvent, viewerId: string | undefined, token?: string) => {
   if (event.cancelled_at && event.host_user_id !== viewerId) return false;
+  if (hasGroupEventAccess(event.id, viewerId)) return true;
   if (event.visibility !== 'private') return !event.space.is_secret || event.host_user_id === viewerId || Boolean(event.viewer_rsvp);
   return event.host_user_id === viewerId
     || Boolean(event.viewer_rsvp)
@@ -1774,6 +1834,19 @@ function seedRsvps(eventId: string, date: string, userIds: string[], status: Rsv
 function seedCheckins(eventId: string, date: string, userIds: string[]) {
   userIds.forEach((userId, index) => {
     localState.checkins.push({ event_id: eventId, occurrence_date: date, user_id: userId, created_at: minutesAgo(90 - index * 5) });
+  });
+}
+
+function seedHereMessages(eventId: string, date: string, lines: [string, string][]) {
+  lines.forEach(([userId, body], index) => {
+    localState.hereMessages.push({
+      id: createId('here'),
+      event_id: eventId,
+      occurrence_date: date,
+      user_id: userId,
+      body,
+      created_at: minutesAgo((lines.length - index) * 8),
+    });
   });
 }
 
@@ -1886,6 +1959,10 @@ function seedDemoHosted() {
     }, timestamp));
     seedRsvps(DEMO_LIVE_EVENT, today, ['user-nina', 'user-emma', 'user-zoe', 'user-marcus']);
     seedCheckins(DEMO_LIVE_EVENT, today, ['user-mike', 'user-nina', 'user-zoe']);
+    seedHereMessages(DEMO_LIVE_EVENT, today, [
+      ['user-mike', 'We are at the back table.'],
+      ['user-nina', 'Grabbing a chair, be right there.'],
+    ]);
   }
 
   // "Board game night at The Board Room, Friday 8pm, 4 spots open."
@@ -1965,6 +2042,16 @@ function seedDemoHosted() {
 
   localState.hostedEvents = events;
   seedDemoMentionPresence();
+  if (localState.directMessages.length === 0) {
+    localState.directMessages.push({
+      id: 'dm-demo-nina',
+      sender_id: 'user-nina',
+      recipient_id: demoCurrentUserId,
+      body: 'Save me a seat if you are coming by later.',
+      created_at: minutesAgo(20),
+      profile: findLocalProfile('user-nina'),
+    });
+  }
 }
 
 function getLocalHosted(viewerId?: string) {
@@ -2134,6 +2221,14 @@ export async function createHostedEvent(userId: string, input: CreateHostedEvent
   }
   if (isSupabaseConfigured && supabase && !isUuid(userId)) throw new Error('Sign in to host an event');
 
+  const groupIds = Array.from(new Set((input.groupIds || []).filter(Boolean)));
+  if (groupIds.length > 0) {
+    const joinedIds = new Set((await listMyGroups(userId)).map((group) => group.id));
+    if (groupIds.some((groupId) => !joinedIds.has(groupId))) {
+      throw new Error('You can only post to groups you belong to.');
+    }
+  }
+
   const space = await resolveEventSpace(userId, input);
   if (space.is_secret && input.visibility === 'public') throw new Error('Public hangouts have to be at a public spot.');
 
@@ -2169,8 +2264,9 @@ export async function createHostedEvent(userId: string, input: CreateHostedEvent
   };
 
   if (!canUseUserScopedRemote(userId)) {
-    seedDemoHosted();
+    seedDemoGroups();
     localState.hostedEvents?.push(event);
+    groupIds.forEach((groupId) => localState.eventGroups.push({ event_id: id, group_id: groupId }));
     eventCache.clear();
     return hydrateHosted(event, userId);
   }
@@ -2199,6 +2295,14 @@ export async function createHostedEvent(userId: string, input: CreateHostedEvent
     source_created_at: timestamp,
   });
   if (error) throw new Error(error.message);
+  if (groupIds.length > 0) {
+    const { error: linkError } = await supabase.from('event_groups').insert(groupIds.map((groupId) => ({
+      event_id: id,
+      group_id: groupId,
+      created_by: userId,
+    })));
+    if (linkError) throw new Error(linkError.message);
+  }
   eventCache.clear();
   return (await getEvent(id, userId, token)) || event;
 }
@@ -2473,11 +2577,433 @@ type MessageListener = (message: EventMessage) => void;
 const localChatListeners = new Map<string, Set<MessageListener>>();
 const chatKey = (eventId: string, date: string) => `${eventId}|${date}`;
 
+function chatDatesFor(event: SpaceEvent, userId: string, rsvps: { event_id: string; occurrence_date: string }[]) {
+  const series = eventSeriesId(event);
+  const dates = new Set<string>();
+  rsvps
+    .filter((rsvp) => rsvp.event_id === event.id || rsvp.event_id === series)
+    .forEach((rsvp) => dates.add(rsvp.occurrence_date));
+  if (event.host_user_id === userId) {
+    const next = nextOccurrenceDate(event);
+    if (next) dates.add(next);
+    if (event.kind === 'weekly' && event.weekday !== undefined) {
+      const yesterday = new Date();
+      yesterday.setDate(yesterday.getDate() - 1);
+      if (parseDateKey(toDateKey(yesterday)).getDay() === event.weekday) dates.add(toDateKey(yesterday));
+    }
+  }
+  return Array.from(dates).filter((date) => isChatOpen(date));
+}
+
+function withChatAccess(event: SpaceEvent, userId: string, date: string, going: boolean): SpaceEvent {
+  return { ...event, occurrence_date: date, viewer_going: going || event.viewer_going };
+}
+
+function latestMessage(messages: EventMessage[], eventId: string, date: string) {
+  return messages
+    .filter((message) => message.event_id === eventId && message.occurrence_date === date)
+    .sort((first, second) => second.created_at.localeCompare(first.created_at))[0];
+}
+
 /** The host and people going for that date are in the chat, and it closes the day after the event. */
 export function canUseEventChat(event: SpaceEvent, viewerId?: string) {
   if (!viewerId || event.cancelled_at || !event.occurrence_date) return false;
   if (!isChatOpen(event.occurrence_date)) return false;
   return event.host_user_id === viewerId || event.viewer_going;
+}
+
+/** Checked-in people only, and only while the hangout is still live. */
+export function canUseHereChat(event: SpaceEvent, viewerId?: string) {
+  if (!viewerId || !event.occurrence_date || event.cancelled_at || !event.viewer_here) return false;
+  return getEventPhase(event, event.occurrence_date) === 'live';
+}
+
+const hereChatListeners = new Map<string, Set<MessageListener>>();
+
+export async function listHereMessages(event: SpaceEvent, date: string): Promise<EventMessage[]> {
+  if (getEventPhase(event, date) !== 'live') return [];
+  const seriesId = eventSeriesId(event);
+  if (isLocalEventId(seriesId) || !canUseUserScopedRemote(event.host_user_id || '')) {
+    return localState.hereMessages
+      .filter((message) => message.event_id === seriesId && message.occurrence_date === date)
+      .sort((first, second) => first.created_at.localeCompare(second.created_at))
+      .map((message) => ({ ...message, profile: findLocalProfile(message.user_id) || message.profile }));
+  }
+
+  const { data, error } = await supabase
+    .from('here_messages')
+    .select('*')
+    .eq('event_id', seriesId)
+    .eq('occurrence_date', date)
+    .order('created_at', { ascending: true })
+    .limit(300);
+  if (error) throw new Error(error.message);
+  const rows = (data || []) as Record<string, unknown>[];
+  const profiles = await fetchProfilesByUserId(rows.map((row) => String(row.user_id)));
+  return rows.map((row) => mapMessageRow(row, profiles));
+}
+
+export async function sendHereMessage(userId: string, event: SpaceEvent, body: string): Promise<EventMessage> {
+  const text = body.trim();
+  if (!text) throw new Error('Write something first.');
+  if (text.length > MAX_EVENT_MESSAGE_LENGTH) throw new Error(`Keep it under ${MAX_EVENT_MESSAGE_LENGTH} characters.`);
+  if (!canUseHereChat(event, userId) || !event.occurrence_date) throw new Error('Check in while the hangout is live to join this chat.');
+  if (isSupabaseConfigured && supabase && !isUuid(userId)) throw new Error('Sign in to chat');
+
+  const seriesId = eventSeriesId(event);
+  if (isLocalEventId(seriesId) || !canUseUserScopedRemote(userId)) {
+    const message: EventMessage = {
+      id: createId('here'),
+      event_id: seriesId,
+      occurrence_date: event.occurrence_date,
+      user_id: userId,
+      body: text,
+      created_at: toIso(),
+      profile: findLocalProfile(userId),
+    };
+    localState.hereMessages.push(message);
+    hereChatListeners.get(chatKey(seriesId, event.occurrence_date))?.forEach((listener) => listener(message));
+    return message;
+  }
+
+  const { data, error } = await supabase
+    .from('here_messages')
+    .insert({ event_id: seriesId, occurrence_date: event.occurrence_date, user_id: userId, body: text })
+    .select()
+    .single();
+  if (error) throw new Error(error.message);
+  const profiles = await fetchProfilesByUserId([userId]);
+  return mapMessageRow(data as Record<string, unknown>, profiles);
+}
+
+export function subscribeToHereMessages(event: SpaceEvent, date: string, onMessage: MessageListener): () => void {
+  const seriesId = eventSeriesId(event);
+  if (isLocalEventId(seriesId)) {
+    const key = chatKey(seriesId, date);
+    const listeners = hereChatListeners.get(key) || new Set<MessageListener>();
+    listeners.add(onMessage);
+    hereChatListeners.set(key, listeners);
+    return () => { listeners.delete(onMessage); };
+  }
+
+  const channel = supabase
+    .channel(`here-chat-${seriesId}-${date}`)
+    .on(
+      'postgres_changes',
+      { event: 'INSERT', schema: 'public', table: 'here_messages', filter: `event_id=eq.${seriesId}` },
+      async (payload: { new: Record<string, unknown> }) => {
+        if (String(payload.new.occurrence_date) !== date) return;
+        const profiles = await fetchProfilesByUserId([String(payload.new.user_id)]);
+        onMessage(mapMessageRow(payload.new, profiles));
+      }
+    )
+    .subscribe();
+  return () => { supabase.removeChannel(channel); };
+}
+
+function localMessageableIds(userId: string) {
+  seedDemoGroups();
+  seedDemoHosted();
+  const ids = new Set<string>();
+  localState.following.forEach((id) => {
+    if (localState.followers.has(id)) ids.add(id);
+  });
+  const myGroups = new Set(localState.groupMembers.filter((member) => member.user_id === userId).map((member) => member.group_id));
+  localState.groupMembers.forEach((member) => {
+    if (myGroups.has(member.group_id)) ids.add(member.user_id);
+  });
+  [...localState.eventInvites, ...localState.groupInvites].forEach((invite) => {
+    if (invite.invitee_user_id === userId) ids.add(invite.invited_by);
+    if (invite.invited_by === userId) ids.add(invite.invitee_user_id);
+  });
+  const myEvents = new Set<string>();
+  (localState.hostedEvents || []).forEach((event) => {
+    if (event.host_user_id === userId) myEvents.add(event.id);
+  });
+  localState.rsvps.forEach((rsvp) => {
+    if (rsvp.user_id === userId && rsvp.status === 'going') myEvents.add(rsvp.event_id);
+  });
+  localState.checkins.forEach((checkin) => {
+    if (checkin.user_id === userId) myEvents.add(checkin.event_id);
+  });
+  (localState.hostedEvents || []).forEach((event) => {
+    if (myEvents.has(event.id) && event.host_user_id) ids.add(event.host_user_id);
+  });
+  localState.rsvps.forEach((rsvp) => {
+    if (myEvents.has(rsvp.event_id) && rsvp.status === 'going') ids.add(rsvp.user_id);
+  });
+  localState.checkins.forEach((checkin) => {
+    if (myEvents.has(checkin.event_id)) ids.add(checkin.user_id);
+  });
+  localState.directMessages.forEach((message) => {
+    if (message.sender_id === userId) ids.add(message.recipient_id);
+    if (message.recipient_id === userId) ids.add(message.sender_id);
+  });
+  ids.delete(userId);
+  return ids;
+}
+
+export async function listMessageablePeople(userId: string): Promise<Profile[]> {
+  if (!canUseUserScopedRemote(userId)) {
+    return Array.from(localMessageableIds(userId))
+      .map((id) => findLocalProfile(id))
+      .filter((profile): profile is Profile => Boolean(profile))
+      .sort((first, second) => getDisplayName(first).localeCompare(getDisplayName(second)));
+  }
+
+  const { data, error } = await supabase.rpc('list_messageable_people');
+  if (error) throw new Error(error.message);
+  const ids = Array.from(new Set(((data || []) as { user_id: string }[]).map((row) => row.user_id).filter((id) => id && id !== userId)));
+  const profiles = await fetchProfilesByUserId(ids);
+  return ids
+    .map((id) => profiles[id])
+    .filter((profile): profile is Profile => Boolean(profile))
+    .sort((first, second) => getDisplayName(first).localeCompare(getDisplayName(second)));
+}
+
+function otherPerson(message: DirectMessage, userId: string) {
+  return message.sender_id === userId ? message.recipient_id : message.sender_id;
+}
+
+export async function listDirectThreads(userId: string): Promise<DirectThread[]> {
+  if (!canUseUserScopedRemote(userId)) {
+    seedDemoHosted();
+    const mine = localState.directMessages.filter((message) => message.sender_id === userId || message.recipient_id === userId);
+    const byUser = new Map<string, DirectMessage>();
+    mine.forEach((message) => {
+      const other = otherPerson(message, userId);
+      const current = byUser.get(other);
+      if (!current || message.created_at > current.created_at) byUser.set(other, message);
+    });
+    return Array.from(byUser.entries())
+      .map(([other, last]) => ({ user_id: other, profile: findLocalProfile(other), last_message: { ...last, profile: findLocalProfile(last.sender_id) } }))
+      .sort((first, second) => second.last_message.created_at.localeCompare(first.last_message.created_at));
+  }
+
+  const { data, error } = await supabase
+    .from('direct_messages')
+    .select('*')
+    .or(`sender_id.eq.${userId},recipient_id.eq.${userId}`)
+    .order('created_at', { ascending: false })
+    .limit(200);
+  if (error) throw new Error(error.message);
+  const rows = (data || []) as Record<string, unknown>[];
+  const profiles = await fetchProfilesByUserId(rows.flatMap((row) => [String(row.sender_id), String(row.recipient_id)]));
+  const byUser = new Map<string, DirectMessage>();
+  rows.forEach((row) => {
+    const message: DirectMessage = {
+      id: String(row.id),
+      sender_id: String(row.sender_id),
+      recipient_id: String(row.recipient_id),
+      body: String(row.body || ''),
+      created_at: String(row.created_at),
+      profile: profiles[String(row.sender_id)],
+    };
+    const other = otherPerson(message, userId);
+    if (!byUser.has(other)) byUser.set(other, message);
+  });
+  return Array.from(byUser.entries()).map(([other, last]) => ({
+    user_id: other,
+    profile: profiles[other],
+    last_message: last,
+  }));
+}
+
+export async function listDirectMessages(userId: string, otherUserId: string): Promise<DirectMessage[]> {
+  if (!canUseUserScopedRemote(userId)) {
+    seedDemoHosted();
+    return localState.directMessages
+      .filter((message) =>
+        (message.sender_id === userId && message.recipient_id === otherUserId)
+        || (message.sender_id === otherUserId && message.recipient_id === userId))
+      .sort((first, second) => first.created_at.localeCompare(second.created_at))
+      .map((message) => ({ ...message, profile: findLocalProfile(message.sender_id) }));
+  }
+
+  const { data, error } = await supabase
+    .from('direct_messages')
+    .select('*')
+    .or(`and(sender_id.eq.${userId},recipient_id.eq.${otherUserId}),and(sender_id.eq.${otherUserId},recipient_id.eq.${userId})`)
+    .order('created_at', { ascending: true })
+    .limit(300);
+  if (error) throw new Error(error.message);
+  const rows = (data || []) as Record<string, unknown>[];
+  const profiles = await fetchProfilesByUserId(rows.map((row) => String(row.sender_id)));
+  return rows.map((row) => ({
+    id: String(row.id),
+    sender_id: String(row.sender_id),
+    recipient_id: String(row.recipient_id),
+    body: String(row.body || ''),
+    created_at: String(row.created_at),
+    profile: profiles[String(row.sender_id)],
+  }));
+}
+
+export async function sendDirectMessage(userId: string, otherUserId: string, body: string): Promise<DirectMessage> {
+  const text = body.trim();
+  if (!text) throw new Error('Write something first.');
+  if (text.length > MAX_EVENT_MESSAGE_LENGTH) throw new Error(`Keep it under ${MAX_EVENT_MESSAGE_LENGTH} characters.`);
+  if (otherUserId === userId) throw new Error('You cannot message yourself.');
+  if (isSupabaseConfigured && supabase && !isUuid(userId)) throw new Error('Sign in to send a message');
+  if (!canUseUserScopedRemote(userId) && !localMessageableIds(userId).has(otherUserId)) {
+    throw new Error('You can message people you share a hangout, group, invite, or mutual follow with.');
+  }
+
+  if (canUseUserScopedRemote(userId)) {
+    const { data: allowed, error: accessError } = await supabase.rpc('can_message_user', { other_user: otherUserId });
+    if (accessError) throw new Error(accessError.message);
+    if (!allowed) throw new Error('You can message people you share a hangout, group, invite, or mutual follow with.');
+  }
+
+  if (!canUseUserScopedRemote(userId)) {
+    const message: DirectMessage = {
+      id: createId('dm'),
+      sender_id: userId,
+      recipient_id: otherUserId,
+      body: text,
+      created_at: toIso(),
+      profile: findLocalProfile(userId),
+    };
+    localState.directMessages.push(message);
+    return message;
+  }
+
+  const { data, error } = await supabase
+    .from('direct_messages')
+    .insert({ sender_id: userId, recipient_id: otherUserId, body: text })
+    .select()
+    .single();
+  if (error) throw new Error(error.message);
+  const profiles = await fetchProfilesByUserId([userId]);
+  return {
+    id: String(data.id),
+    sender_id: userId,
+    recipient_id: otherUserId,
+    body: text,
+    created_at: String(data.created_at),
+    profile: profiles[userId],
+  };
+}
+
+export async function listMyChats(userId: string): Promise<ChatThread[]> {
+  if (!canUseUserScopedRemote(userId)) {
+    seedDemoHosted();
+    const events = getLocalHosted(userId).filter((event) => !event.cancelled_at);
+    const threads = events.flatMap((event) => chatDatesFor(event, userId, localState.rsvps.filter((rsvp) => rsvp.status === 'going')).flatMap((date) => {
+      const going = localState.rsvps.some((rsvp) => rsvp.event_id === eventSeriesId(event) && rsvp.occurrence_date === date && rsvp.user_id === userId && rsvp.status === 'going');
+      const threaded = withChatAccess(event, userId, date, going);
+      if (!canUseEventChat(threaded, userId)) return [];
+      return [{
+        event: threaded,
+        occurrence_date: date,
+        last_message: latestMessage(localState.messages, eventSeriesId(event), date),
+      }];
+    }));
+    const hereThreads = events.flatMap((event) => {
+      const date = event.event_date;
+      if (!date) return [];
+      const here = localState.checkins.some((checkin) => checkin.event_id === eventSeriesId(event) && checkin.occurrence_date === date && checkin.user_id === userId);
+      const threaded = { ...event, occurrence_date: date, viewer_here: here };
+      if (!canUseHereChat(threaded, userId)) return [];
+      return [{
+        event: threaded,
+        occurrence_date: date,
+        kind: 'here' as const,
+        last_message: latestMessage(localState.hereMessages, eventSeriesId(event), date),
+      }];
+    });
+    return [...hereThreads, ...threads].sort((first, second) => (second.last_message?.created_at || second.occurrence_date).localeCompare(first.last_message?.created_at || first.occurrence_date));
+  }
+
+  const since = new Date();
+  since.setDate(since.getDate() - 1);
+  const sinceKey = toDateKey(since);
+  const [hostedResult, rsvpResult] = await Promise.all([
+    supabase.from('space_events').select('*, spaces!inner(*)').eq('host_user_id', userId).is('cancelled_at', null),
+    supabase.from('event_rsvps').select('event_id, occurrence_date').eq('user_id', userId).eq('status', 'going').gte('occurrence_date', sinceKey),
+  ]);
+  if (hostedResult.error) throw new Error(hostedResult.error.message);
+  if (rsvpResult.error) throw new Error(rsvpResult.error.message);
+
+  const hostedRows = (hostedResult.data || []) as Record<string, unknown>[];
+  const rsvps = (rsvpResult.data || []) as { event_id: string; occurrence_date: string }[];
+  const known = new Set(hostedRows.map((row) => String(row.id)));
+  const missing = Array.from(new Set(rsvps.map((rsvp) => rsvp.event_id).filter((id) => !known.has(id))));
+  let extraRows: Record<string, unknown>[] = [];
+  if (missing.length > 0) {
+    const extra = await supabase.from('space_events').select('*, spaces!inner(*)').in('id', missing).is('cancelled_at', null);
+    if (extra.error) throw new Error(extra.error.message);
+    extraRows = (extra.data || []) as Record<string, unknown>[];
+  }
+
+  const rows = [...hostedRows, ...extraRows];
+  const profiles = await fetchProfilesByUserId(rows.map((row) => String(row.host_user_id || '')).filter(isUuid));
+  const events = rows.map((row) => {
+    const stored = mapStoredEventRow(row);
+    const hostId = stored.host_user_id;
+    return rowToSpaceEvent(stored, mapSpaceRow(row.spaces as Record<string, unknown>), hostId ? profiles[hostId] : undefined);
+  });
+
+  const threads = events.flatMap((event) => chatDatesFor(event, userId, rsvps).flatMap((date) => {
+    const series = eventSeriesId(event);
+    const going = rsvps.some((rsvp) => (rsvp.event_id === event.id || rsvp.event_id === series) && rsvp.occurrence_date === date);
+    const threaded = withChatAccess(event, userId, date, going);
+    if (!canUseEventChat(threaded, userId)) return [];
+    return [{ event: threaded, occurrence_date: date }];
+  }));
+  const seen = new Set<string>();
+  const unique: ChatThread[] = threads.filter((thread) => {
+    const key = `${eventSeriesId(thread.event)}|${thread.occurrence_date}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+  const checkinResult = await supabase.from('event_checkins').select('event_id, occurrence_date').eq('user_id', userId).gte('occurrence_date', sinceKey);
+  if (!checkinResult.error) {
+    const checkins = (checkinResult.data || []) as { event_id: string; occurrence_date: string }[];
+    checkins.forEach((checkin) => {
+      const event = events.find((item) => item.id === checkin.event_id || eventSeriesId(item) === checkin.event_id);
+      if (!event) return;
+      const threaded = { ...event, occurrence_date: checkin.occurrence_date, viewer_here: true };
+      if (!canUseHereChat(threaded, userId)) return;
+      const key = `here|${eventSeriesId(event)}|${checkin.occurrence_date}`;
+      if (seen.has(key)) return;
+      seen.add(key);
+      unique.push({ event: threaded, occurrence_date: checkin.occurrence_date, kind: 'here' });
+    });
+  }
+
+  if (unique.length === 0) return [];
+
+  const goingIds = Array.from(new Set(unique.filter((thread) => thread.kind !== 'here').map((thread) => eventSeriesId(thread.event))));
+  const messageResult = goingIds.length === 0
+    ? { data: [], error: null }
+    : await supabase
+    .from('event_messages')
+    .select('*')
+    .in('event_id', goingIds)
+    .gte('occurrence_date', sinceKey)
+    .order('created_at', { ascending: false })
+    .limit(400);
+  if (messageResult.error) throw new Error(messageResult.error.message);
+  const messageRows = (messageResult.data || []) as Record<string, unknown>[];
+  const messageProfiles = await fetchProfilesByUserId(messageRows.map((row) => String(row.user_id)));
+  const messages = messageRows.map((row) => mapMessageRow(row, messageProfiles));
+  const hereIds = Array.from(new Set(unique.filter((thread) => thread.kind === 'here').map((thread) => eventSeriesId(thread.event))));
+  let hereRows: Record<string, unknown>[] = [];
+  if (hereIds.length > 0) {
+    const hereResult = await supabase.from('here_messages').select('*').in('event_id', hereIds).gte('occurrence_date', sinceKey).order('created_at', { ascending: false }).limit(200);
+    if (!hereResult.error) hereRows = (hereResult.data || []) as Record<string, unknown>[];
+  }
+  const hereProfiles = await fetchProfilesByUserId(hereRows.map((row) => String(row.user_id)));
+  const hereMessages = hereRows.map((row) => mapMessageRow(row, hereProfiles));
+
+  return unique
+    .map((thread) => ({
+      ...thread,
+      last_message: latestMessage(thread.kind === 'here' ? hereMessages : messages, eventSeriesId(thread.event), thread.occurrence_date),
+    }))
+    .sort((first, second) => (second.last_message?.created_at || second.occurrence_date).localeCompare(first.last_message?.created_at || first.occurrence_date));
 }
 
 export async function listEventMessages(event: SpaceEvent, date: string): Promise<EventMessage[]> {
@@ -2563,4 +3089,597 @@ export function subscribeToEventMessages(event: SpaceEvent, date: string, onMess
   return () => {
     supabase.removeChannel(channel);
   };
+}
+
+let seedingGroups = false;
+
+function seedDemoGroups() {
+  if (localState.groups || seedingGroups) return;
+  seedingGroups = true;
+  try {
+    seedDemoHosted();
+    const timestamp = toIso();
+    const cafeId = '00000000-0000-0000-0000-000000000101';
+    localState.groups = [
+      {
+        id: 'group-company',
+        name: 'Company hangout',
+        description: 'The team, off the clock.',
+        visibility: 'private',
+        invite_token: 'demo-company-invite',
+        created_by: demoCurrentUserId,
+        created_at: timestamp,
+        updated_at: timestamp,
+      },
+      {
+        id: 'group-arlington',
+        name: 'Arlington girls',
+        description: 'What is happening around Arlington.',
+        visibility: 'public',
+        invite_token: 'demo-arlington-invite',
+        created_by: 'user-nina',
+        created_at: timestamp,
+        updated_at: timestamp,
+      },
+    ];
+    localState.groupMembers.push(
+      { group_id: 'group-company', user_id: demoCurrentUserId, role: 'owner', created_at: timestamp },
+      { group_id: 'group-company', user_id: 'user-mike', role: 'member', created_at: timestamp },
+      { group_id: 'group-arlington', user_id: 'user-nina', role: 'owner', created_at: timestamp },
+    );
+    if (!localState.eventGroups.some((link) => link.event_id === DEMO_COFFEE_EVENT && link.group_id === 'group-company')) {
+      localState.eventGroups.push({ event_id: DEMO_COFFEE_EVENT, group_id: 'group-company' });
+    }
+    if (localState.spaces.some((space) => space.id === cafeId)) {
+      localState.groupSpots.push({ group_id: 'group-company', space_id: cafeId, added_by: demoCurrentUserId, created_at: timestamp });
+    }
+    localState.groupInvites.push({
+      target_id: 'group-arlington',
+      invitee_user_id: demoCurrentUserId,
+      invited_by: 'user-nina',
+      status: 'pending',
+      created_at: timestamp,
+    });
+  } finally {
+    seedingGroups = false;
+  }
+}
+
+function hasGroupEventAccess(eventId: string, viewerId?: string) {
+  if (!viewerId) return false;
+  seedDemoGroups();
+  const invited = localState.eventInvites.some((invite) =>
+    invite.target_id === eventId
+    && invite.invitee_user_id === viewerId
+    && (invite.status === 'pending' || invite.status === 'accepted')
+  );
+  if (invited) return true;
+  const groupIds = new Set(localState.eventGroups.filter((link) => link.event_id === eventId).map((link) => link.group_id));
+  return localState.groupMembers.some((member) => member.user_id === viewerId && groupIds.has(member.group_id));
+}
+
+function presentGroup(stored: StoredGroup, viewerId?: string): Group {
+  const members = localState.groupMembers.filter((member) => member.group_id === stored.id);
+  const viewer = viewerId ? members.find((member) => member.user_id === viewerId) : undefined;
+  const invite = viewerId
+    ? localState.groupInvites.find((item) => item.target_id === stored.id && item.invitee_user_id === viewerId)
+    : undefined;
+  return {
+    id: stored.id,
+    name: stored.name,
+    description: stored.description,
+    visibility: stored.visibility,
+    invite_token: viewer ? stored.invite_token : undefined,
+    created_by: stored.created_by,
+    created_at: stored.created_at,
+    updated_at: stored.updated_at,
+    member_count: members.length,
+    viewer_role: viewer?.role,
+    invite_status: invite?.status,
+  };
+}
+
+function canSeeLocalGroup(stored: StoredGroup, viewerId?: string, token?: string) {
+  if (stored.visibility === 'public') return true;
+  if (viewerId && localState.groupMembers.some((member) => member.group_id === stored.id && member.user_id === viewerId)) return true;
+  if (viewerId && localState.groupInvites.some((invite) =>
+    invite.target_id === stored.id
+    && invite.invitee_user_id === viewerId
+    && (invite.status === 'pending' || invite.status === 'accepted')
+  )) return true;
+  return Boolean(token && token === stored.invite_token);
+}
+
+function mapFetchedGroup(payload: Record<string, unknown> | null): Group | null {
+  const row = payload?.group as Record<string, unknown> | undefined;
+  if (!row?.id) return null;
+  const role = payload?.viewer_role;
+  const status = payload?.invite_status;
+  return {
+    id: String(row.id),
+    name: String(row.name),
+    description: (row.description as string | null) || undefined,
+    visibility: row.visibility === 'public' ? 'public' : 'private',
+    invite_token: (row.invite_token as string | null) || undefined,
+    created_by: String(row.created_by),
+    created_at: String(row.created_at),
+    updated_at: String(row.updated_at),
+    member_count: Number(payload?.member_count || 0),
+    viewer_role: role === 'owner' || role === 'member' ? role : undefined,
+    invite_status: status === 'pending' || status === 'accepted' || status === 'declined' ? status : undefined,
+  };
+}
+
+function groupFromRow(row: Record<string, unknown>, viewerId: string, members: { group_id: string; user_id: string; role: string }[]): Group {
+  const mine = members.filter((member) => member.group_id === String(row.id));
+  const viewer = mine.find((member) => member.user_id === viewerId);
+  const role = viewer?.role;
+  return {
+    id: String(row.id),
+    name: String(row.name),
+    description: (row.description as string | null) || undefined,
+    visibility: row.visibility === 'public' ? 'public' : 'private',
+    invite_token: viewer ? ((row.invite_token as string | null) || undefined) : undefined,
+    created_by: String(row.created_by),
+    created_at: String(row.created_at),
+    updated_at: String(row.updated_at),
+    member_count: mine.length,
+    viewer_role: role === 'owner' || role === 'member' ? role : undefined,
+  };
+}
+
+async function memberRowsFor(groupIds: string[]) {
+  if (!supabase || groupIds.length === 0) return [];
+  const { data, error } = await supabase.from('group_members').select('group_id, user_id, role').in('group_id', groupIds);
+  if (error) throw new Error(error.message);
+  return (data || []) as { group_id: string; user_id: string; role: string }[];
+}
+
+function requireGroupUser(userId: string, message: string) {
+  if (isSupabaseConfigured && supabase && !isUuid(userId)) throw new Error(message);
+}
+
+function assertLocalFollow(userId: string, inviteeId: string) {
+  if (inviteeId === userId) throw new Error('You can only invite someone else');
+  if (!localState.following.has(inviteeId)) throw new Error('You can only invite people you follow');
+}
+
+function upsertLocalInvite(bucket: LocalInvite[], targetId: string, inviteeId: string, invitedBy: string) {
+  const existing = bucket.find((invite) => invite.target_id === targetId && invite.invitee_user_id === inviteeId);
+  if (!existing) {
+    bucket.push({
+      target_id: targetId,
+      invitee_user_id: inviteeId,
+      invited_by: invitedBy,
+      status: 'pending',
+      created_at: toIso(),
+    });
+    return;
+  }
+  if (existing.status === 'declined') {
+    existing.status = 'pending';
+    existing.invited_by = invitedBy;
+    existing.created_at = toIso();
+  }
+}
+
+export async function listMyGroups(userId: string): Promise<Group[]> {
+  if (!canUseUserScopedRemote(userId)) {
+    seedDemoGroups();
+    return (localState.groups || [])
+      .filter((group) => localState.groupMembers.some((member) => member.group_id === group.id && member.user_id === userId))
+      .map((group) => presentGroup(group, userId));
+  }
+
+  const { data, error } = await supabase.from('group_members').select('group_id').eq('user_id', userId);
+  if (error) throw new Error(error.message);
+  const ids = ((data || []) as { group_id: string }[]).map((row) => row.group_id);
+  if (ids.length === 0) return [];
+  const [{ data: rows, error: groupError }, members] = await Promise.all([
+    supabase.from('groups').select('*').in('id', ids),
+    memberRowsFor(ids),
+  ]);
+  if (groupError) throw new Error(groupError.message);
+  return ((rows || []) as Record<string, unknown>[]).map((row) => groupFromRow(row, userId, members));
+}
+
+export async function listPublicGroups(viewerId = demoCurrentUserId): Promise<Group[]> {
+  if (!canUseUserScopedRemote(viewerId)) {
+    seedDemoGroups();
+    return (localState.groups || [])
+      .filter((group) => group.visibility === 'public')
+      .map((group) => presentGroup(group, viewerId));
+  }
+
+  const { data, error } = await supabase
+    .from('groups')
+    .select('*')
+    .eq('visibility', 'public')
+    .order('created_at', { ascending: false })
+    .limit(40);
+  if (error) throw new Error(error.message);
+  const rows = (data || []) as Record<string, unknown>[];
+  const members = await memberRowsFor(rows.map((row) => String(row.id)));
+  return rows.map((row) => groupFromRow(row, viewerId, members));
+}
+
+export async function getGroup(groupId: string, viewerId?: string, token?: string): Promise<Group | null> {
+  if (!isUuid(groupId) || !canUseUserScopedRemote(viewerId || '')) {
+    seedDemoGroups();
+    const stored = localState.groups?.find((group) => group.id === groupId);
+    if (!stored || !canSeeLocalGroup(stored, viewerId, token)) return null;
+    return presentGroup(stored, viewerId);
+  }
+
+  const { data, error } = await supabase.rpc('fetch_group', { target_id: groupId, token: token || null });
+  if (error) throw new Error(error.message);
+  return mapFetchedGroup((data || null) as Record<string, unknown> | null);
+}
+
+export async function getGroupDetail(groupId: string, viewerId: string, token?: string): Promise<GroupDetail | null> {
+  const group = await getGroup(groupId, viewerId, token);
+  if (!group) return null;
+  const contentVisible = group.visibility === 'public' || Boolean(group.viewer_role);
+  if (!contentVisible) {
+    return { group, members: [], events: [], spots: [], feed: [], content_visible: false };
+  }
+
+  if (!isUuid(groupId) || !canUseUserScopedRemote(viewerId)) {
+    seedDemoGroups();
+    const members = localMembers(groupId);
+    const memberIds = members.map((member) => member.user_id);
+    const feed = (await listRecentActivity({ currentUserId: viewerId, authorIds: memberIds })).slice(0, 40);
+    const linkedIds = new Set(localState.eventGroups.filter((link) => link.group_id === groupId).map((link) => link.event_id));
+    const events = getLocalHosted(viewerId)
+      .filter((event) => linkedIds.has(event.id) && !event.cancelled_at)
+      .filter((event) => event.visibility !== 'private' || Boolean(group.viewer_role))
+      .sort((first, second) => (first.event_date || '').localeCompare(second.event_date || ''));
+    const spots = collectSpots(groupId, feed, events);
+    return { group, members, events, spots, feed, content_visible: true };
+  }
+
+  const { data: memberRows, error: memberError } = await supabase
+    .from('group_members')
+    .select('group_id, user_id, role, created_at')
+    .eq('group_id', groupId)
+    .order('created_at', { ascending: true });
+  if (memberError) throw new Error(memberError.message);
+  const memberRecords = (memberRows || []) as { group_id: string; user_id: string; role: GroupRole; created_at: string }[];
+  const profiles = await fetchProfilesByUserId(memberRecords.map((member) => member.user_id));
+  const members: GroupMember[] = memberRecords.map((member) => ({
+    ...member,
+    role: member.role === 'owner' ? 'owner' : 'member',
+    profile: profiles[member.user_id] || placeholderProfile(member.user_id, member.created_at),
+  }));
+
+  const { data: linkRows, error: linkError } = await supabase
+    .from('event_groups')
+    .select('space_events!inner(*, spaces!inner(*))')
+    .eq('group_id', groupId);
+  if (linkError) throw new Error(linkError.message);
+  const eventRows = ((linkRows || []) as Record<string, unknown>[])
+    .map((row) => row.space_events as Record<string, unknown> | null)
+    .filter((row): row is Record<string, unknown> => Boolean(row));
+  const hostProfiles = await fetchProfilesByUserId(eventRows.map((row) => String(row.host_user_id || '')).filter(isUuid));
+  const mappedEvents = eventRows.map((row) => {
+    const stored = mapStoredEventRow(row);
+    const hostId = stored.host_user_id;
+    return rowToSpaceEvent(stored, mapSpaceRow(row.spaces as Record<string, unknown>), hostId ? hostProfiles[hostId] : undefined);
+  }).filter((event) => !event.cancelled_at);
+  const presence = await loadPresence(mappedEvents.map((event) => eventSeriesId(event)));
+  const events = mappedEvents
+    .map((event) => applyPresence(event, event.event_date, presence, viewerId))
+    .sort((first, second) => (first.event_date || '').localeCompare(second.event_date || ''));
+
+  const feed = await listRecentActivity({
+    currentUserId: viewerId,
+    authorIds: members.map((member) => member.user_id),
+  });
+
+  const { data: spotRows, error: spotError } = await supabase
+    .from('group_spots')
+    .select('space_id, spaces(*)')
+    .eq('group_id', groupId);
+  if (spotError) throw new Error(spotError.message);
+  const saved = ((spotRows || []) as Record<string, unknown>[])
+    .map((row) => row.spaces as Record<string, unknown> | null)
+    .filter((row): row is Record<string, unknown> => Boolean(row))
+    .map((row) => mapSpaceRow(row));
+  const spots = mergeSpots(saved, feed, events);
+  return { group, members, events, spots, feed, content_visible: true };
+}
+
+function localMembers(groupId: string): GroupMember[] {
+  return localState.groupMembers
+    .filter((member) => member.group_id === groupId)
+    .map((member) => ({
+      ...member,
+      profile: findLocalProfile(member.user_id) || placeholderProfile(member.user_id, member.created_at),
+    }));
+}
+
+function collectSpots(groupId: string, feed: FeedActivity[], events: SpaceEvent[]) {
+  const saved = localState.groupSpots
+    .filter((spot) => spot.group_id === groupId)
+    .map((spot) => localState.spaces.find((space) => space.id === spot.space_id))
+    .filter((space): space is SpaceWithAttributes => Boolean(space));
+  return mergeSpots(saved, feed, events);
+}
+
+function mergeSpots(saved: SpaceWithAttributes[], feed: FeedActivity[], events: SpaceEvent[]) {
+  const byId = new Map<string, SpaceWithAttributes>();
+  saved.forEach((space) => byId.set(space.id, space));
+  feed.forEach((item) => {
+    if (!byId.has(item.space.id)) byId.set(item.space.id, item.space);
+  });
+  events.forEach((event) => {
+    if (!byId.has(event.space.id)) byId.set(event.space.id, event.space);
+  });
+  return Array.from(byId.values());
+}
+
+export async function createGroup(userId: string, input: CreateGroupInput): Promise<Group> {
+  const name = input.name.trim();
+  const description = input.description?.trim();
+  if (!name || name.length > 60) throw new Error('Give it a name, up to 60 characters.');
+  if (description && description.length > 280) throw new Error('Keep the description under 280 characters.');
+  requireGroupUser(userId, 'Sign in to create a group');
+
+  if (!canUseUserScopedRemote(userId)) {
+    seedDemoGroups();
+    const timestamp = toIso();
+    const stored: StoredGroup = {
+      id: createId('group'),
+      name,
+      description: description || undefined,
+      visibility: input.visibility,
+      invite_token: createToken(),
+      created_by: userId,
+      created_at: timestamp,
+      updated_at: timestamp,
+    };
+    localState.groups?.push(stored);
+    localState.groupMembers.push({ group_id: stored.id, user_id: userId, role: 'owner', created_at: timestamp });
+    return presentGroup(stored, userId);
+  }
+
+  const { data, error } = await supabase.rpc('create_group', {
+    group_name: name,
+    group_description: description || '',
+    group_visibility: input.visibility,
+  });
+  if (error) throw new Error(error.message);
+  const group = mapFetchedGroup(data as Record<string, unknown>);
+  if (!group) throw new Error('Could not create the group');
+  return group;
+}
+
+export async function joinGroup(userId: string, groupId: string, token?: string): Promise<void> {
+  requireGroupUser(userId, 'Sign in to join a group');
+  if (!canUseUserScopedRemote(userId) || !isUuid(groupId)) {
+    seedDemoGroups();
+    const stored = localState.groups?.find((group) => group.id === groupId);
+    if (!stored) throw new Error('Group not found');
+    const invite = localState.groupInvites.find((item) => item.target_id === groupId && item.invitee_user_id === userId);
+    const already = localState.groupMembers.some((member) => member.group_id === groupId && member.user_id === userId);
+    if (!already) {
+      const allowed = stored.visibility === 'public'
+        || Boolean(token && token === stored.invite_token)
+        || invite?.status === 'accepted';
+      if (!allowed) throw new Error('You need an invite to join');
+      localState.groupMembers.push({ group_id: groupId, user_id: userId, role: 'member', created_at: toIso() });
+    }
+    if (invite && invite.status === 'pending') invite.status = 'accepted';
+    return;
+  }
+
+  const { error } = await supabase.rpc('join_group', { target_id: groupId, token: token || null });
+  if (error) throw new Error(error.message);
+}
+
+export async function leaveGroup(userId: string, groupId: string): Promise<void> {
+  requireGroupUser(userId, 'Sign in to leave a group');
+  if (!canUseUserScopedRemote(userId) || !isUuid(groupId)) {
+    seedDemoGroups();
+    const membership = localState.groupMembers.find((member) => member.group_id === groupId && member.user_id === userId);
+    if (!membership) return;
+    const others = localState.groupMembers
+      .filter((member) => member.group_id === groupId && member.user_id !== userId)
+      .sort((first, second) => first.created_at.localeCompare(second.created_at) || first.user_id.localeCompare(second.user_id));
+    if (membership.role === 'owner' && others.length === 0) {
+      localState.groups = (localState.groups || []).filter((group) => group.id !== groupId);
+      localState.groupMembers = localState.groupMembers.filter((member) => member.group_id !== groupId);
+      localState.eventGroups = localState.eventGroups.filter((link) => link.group_id !== groupId);
+      localState.groupSpots = localState.groupSpots.filter((spot) => spot.group_id !== groupId);
+      localState.groupInvites = localState.groupInvites.filter((invite) => invite.target_id !== groupId);
+      return;
+    }
+    if (membership.role === 'owner' && others[0]) others[0].role = 'owner';
+    localState.groupMembers = localState.groupMembers.filter((member) => !(member.group_id === groupId && member.user_id === userId));
+    return;
+  }
+
+  const { error } = await supabase.rpc('leave_group', { target_id: groupId });
+  if (error) throw new Error(error.message);
+}
+
+export async function removeGroupMember(userId: string, groupId: string, memberId: string): Promise<void> {
+  requireGroupUser(userId, 'Sign in to manage this group');
+  if (!canUseUserScopedRemote(userId) || !isUuid(groupId)) {
+    seedDemoGroups();
+    const viewer = localState.groupMembers.find((member) => member.group_id === groupId && member.user_id === userId);
+    if (!viewer || viewer.role !== 'owner') throw new Error('Only the owner can remove members');
+    if (memberId === userId) throw new Error('Leave the group to remove yourself');
+    localState.groupMembers = localState.groupMembers.filter((member) => !(member.group_id === groupId && member.user_id === memberId && member.role !== 'owner'));
+    return;
+  }
+
+  const { error } = await supabase.rpc('remove_group_member', { target_id: groupId, member_id: memberId });
+  if (error) throw new Error(error.message);
+}
+
+export async function saveGroupSpot(userId: string, groupId: string, spaceId: string): Promise<void> {
+  requireGroupUser(userId, 'Sign in to save a spot');
+  if (!canUseUserScopedRemote(userId) || !isUuid(groupId)) {
+    seedDemoGroups();
+    const member = localState.groupMembers.some((item) => item.group_id === groupId && item.user_id === userId);
+    if (!member) throw new Error('Join the group to save a spot');
+    if (!localState.groupSpots.some((spot) => spot.group_id === groupId && spot.space_id === spaceId)) {
+      localState.groupSpots.push({ group_id: groupId, space_id: spaceId, added_by: userId, created_at: toIso() });
+    }
+    return;
+  }
+
+  const { error } = await supabase.from('group_spots').insert({ group_id: groupId, space_id: spaceId, added_by: userId });
+  if (error && error.code !== '23505') throw new Error(error.message);
+}
+
+export async function listOutgoingInvites(kind: 'event' | 'group', targetId: string, userId: string): Promise<Record<string, InviteStatus>> {
+  const localBucket = kind === 'event' ? localState.eventInvites : localState.groupInvites;
+  const fromLocal = () => {
+    if (kind === 'group') seedDemoGroups();
+    const statuses: Record<string, InviteStatus> = {};
+    localBucket
+      .filter((invite) => invite.target_id === targetId)
+      .forEach((invite) => { statuses[invite.invitee_user_id] = invite.status; });
+    return statuses;
+  };
+
+  if (!canUseUserScopedRemote(userId) || !isUuid(targetId)) return fromLocal();
+
+  const table = kind === 'event' ? 'event_invites' : 'group_invites';
+  const column = kind === 'event' ? 'event_id' : 'group_id';
+  const { data, error } = await supabase.from(table).select('invitee_user_id, status').eq(column, targetId);
+  if (error) throw new Error(error.message);
+  const statuses: Record<string, InviteStatus> = {};
+  ((data || []) as { invitee_user_id: string; status: InviteStatus }[]).forEach((row) => {
+    statuses[row.invitee_user_id] = row.status;
+  });
+  return statuses;
+}
+
+export async function sendEventInvite(userId: string, eventId: string, inviteeId: string): Promise<void> {
+  requireGroupUser(userId, 'Sign in to invite someone');
+  if (!canUseUserScopedRemote(userId) || !isUuid(eventId)) {
+    seedDemoHosted();
+    const event = localState.hostedEvents?.find((item) => item.id === eventId);
+    if (!event || event.host_user_id !== userId) throw new Error('Only the host can invite people');
+    assertLocalFollow(userId, inviteeId);
+    upsertLocalInvite(localState.eventInvites, eventId, inviteeId, userId);
+    return;
+  }
+
+  const { error } = await supabase.rpc('invite_to_event', { target_id: eventId, invitee: inviteeId });
+  if (error) throw new Error(error.message);
+}
+
+export async function sendGroupInvite(userId: string, groupId: string, inviteeId: string): Promise<void> {
+  requireGroupUser(userId, 'Sign in to invite someone');
+  if (!canUseUserScopedRemote(userId) || !isUuid(groupId)) {
+    seedDemoGroups();
+    const member = localState.groupMembers.some((item) => item.group_id === groupId && item.user_id === userId);
+    if (!member) throw new Error('Only members can invite people');
+    if (localState.groupMembers.some((item) => item.group_id === groupId && item.user_id === inviteeId)) {
+      throw new Error('They are already in the group');
+    }
+    assertLocalFollow(userId, inviteeId);
+    upsertLocalInvite(localState.groupInvites, groupId, inviteeId, userId);
+    return;
+  }
+
+  const { error } = await supabase.rpc('invite_to_group', { target_id: groupId, invitee: inviteeId });
+  if (error) throw new Error(error.message);
+}
+
+export async function respondToEventInvite(userId: string, eventId: string, status: 'accepted' | 'declined'): Promise<void> {
+  requireGroupUser(userId, 'Sign in to respond');
+  if (!canUseUserScopedRemote(userId) || !isUuid(eventId)) {
+    const invite = localState.eventInvites.find((item) => item.target_id === eventId && item.invitee_user_id === userId && item.status === 'pending');
+    if (!invite) throw new Error('Invite not found');
+    invite.status = status;
+    return;
+  }
+
+  const { error } = await supabase.rpc('respond_event_invite', { target_id: eventId, next_status: status });
+  if (error) throw new Error(error.message);
+}
+
+export async function respondToGroupInvite(userId: string, groupId: string, status: 'accepted' | 'declined'): Promise<void> {
+  requireGroupUser(userId, 'Sign in to respond');
+  if (!canUseUserScopedRemote(userId) || !isUuid(groupId)) {
+    const invite = localState.groupInvites.find((item) => item.target_id === groupId && item.invitee_user_id === userId && item.status === 'pending');
+    if (!invite) throw new Error('Invite not found');
+    invite.status = status;
+    if (status === 'accepted') await joinGroup(userId, groupId);
+    return;
+  }
+
+  const { error } = await supabase.rpc('respond_group_invite', { target_id: groupId, next_status: status });
+  if (error) throw new Error(error.message);
+}
+
+export async function listIncomingInvites(userId: string): Promise<IncomingInvite[]> {
+  if (!canUseUserScopedRemote(userId)) {
+    seedDemoGroups();
+    const invites: IncomingInvite[] = [];
+    for (const invite of localState.eventInvites.filter((item) => item.invitee_user_id === userId && item.status === 'pending')) {
+      const event = await getEvent(invite.target_id, userId);
+      if (!event) continue;
+      invites.push({
+        kind: 'event',
+        status: invite.status,
+        created_at: invite.created_at,
+        invited_by: findLocalProfile(invite.invited_by),
+        event,
+      });
+    }
+    for (const invite of localState.groupInvites.filter((item) => item.invitee_user_id === userId && item.status === 'pending')) {
+      const group = await getGroup(invite.target_id, userId);
+      if (!group) continue;
+      invites.push({
+        kind: 'group',
+        status: invite.status,
+        created_at: invite.created_at,
+        invited_by: findLocalProfile(invite.invited_by),
+        group,
+      });
+    }
+    return invites.sort((first, second) => second.created_at.localeCompare(first.created_at));
+  }
+
+  const [eventResult, groupResult] = await Promise.all([
+    supabase.from('event_invites').select('event_id, invited_by, status, created_at').eq('invitee_user_id', userId).eq('status', 'pending'),
+    supabase.from('group_invites').select('group_id, invited_by, status, created_at').eq('invitee_user_id', userId).eq('status', 'pending'),
+  ]);
+  if (eventResult.error) throw new Error(eventResult.error.message);
+  if (groupResult.error) throw new Error(groupResult.error.message);
+
+  const eventRows = (eventResult.data || []) as { event_id: string; invited_by: string; status: InviteStatus; created_at: string }[];
+  const groupRows = (groupResult.data || []) as { group_id: string; invited_by: string; status: InviteStatus; created_at: string }[];
+  const profiles = await fetchProfilesByUserId([...eventRows.map((row) => row.invited_by), ...groupRows.map((row) => row.invited_by)]);
+  const invites: IncomingInvite[] = [];
+
+  for (const row of eventRows) {
+    const event = await getEvent(row.event_id, userId);
+    if (!event) continue;
+    invites.push({
+      kind: 'event',
+      status: row.status,
+      created_at: row.created_at,
+      invited_by: profiles[row.invited_by],
+      event,
+    });
+  }
+  for (const row of groupRows) {
+    const group = await getGroup(row.group_id, userId);
+    if (!group) continue;
+    invites.push({
+      kind: 'group',
+      status: row.status,
+      created_at: row.created_at,
+      invited_by: profiles[row.invited_by],
+      group,
+    });
+  }
+  return invites.sort((first, second) => second.created_at.localeCompare(first.created_at));
 }

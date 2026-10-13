@@ -569,6 +569,28 @@ export interface EventMessage {
 
 export const MAX_EVENT_MESSAGE_LENGTH = 1000;
 
+export interface ChatThread {
+  event: SpaceEvent;
+  occurrence_date: string;
+  last_message?: EventMessage;
+  kind?: 'going' | 'here';
+}
+
+export interface DirectMessage {
+  id: string;
+  sender_id: string;
+  recipient_id: string;
+  body: string;
+  created_at: string;
+  profile?: Profile;
+}
+
+export interface DirectThread {
+  user_id: string;
+  profile?: Profile;
+  last_message: DirectMessage;
+}
+
 export interface CreateHostedEventInput {
   title: string;
   eventDate: string;
@@ -579,10 +601,61 @@ export interface CreateHostedEventInput {
   capacity?: number;
   allowOverCapacity?: boolean;
   linkUrl?: string;
+  groupIds?: string[];
   existingSpace: boolean;
   space: Pick<ThirdSpace, 'id' | 'name' | 'category' | 'address' | 'latitude' | 'longitude'> & {
     primary_purpose?: CategoryPurpose;
   };
+}
+
+export type GroupVisibility = 'public' | 'private';
+export type GroupRole = 'owner' | 'member';
+export type InviteStatus = 'pending' | 'accepted' | 'declined';
+
+export interface Group {
+  id: string;
+  name: string;
+  description?: string;
+  visibility: GroupVisibility;
+  invite_token?: string;
+  created_by: string;
+  created_at: string;
+  updated_at: string;
+  member_count: number;
+  viewer_role?: GroupRole;
+  invite_status?: InviteStatus;
+}
+
+export interface GroupMember {
+  group_id: string;
+  user_id: string;
+  role: GroupRole;
+  created_at: string;
+  profile: Profile;
+}
+
+export interface GroupDetail {
+  group: Group;
+  members: GroupMember[];
+  events: SpaceEvent[];
+  spots: SpaceWithAttributes[];
+  feed: FeedActivity[];
+  content_visible: boolean;
+}
+
+export interface CreateGroupInput {
+  name: string;
+  description?: string;
+  visibility: GroupVisibility;
+}
+
+export interface IncomingInvite {
+  kind: 'event' | 'group';
+  status: InviteStatus;
+  created_at: string;
+  invited_by?: Profile;
+  event?: SpaceEvent;
+  group?: Group;
 }
 
 export interface CalendarOccurrence {

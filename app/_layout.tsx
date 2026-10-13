@@ -82,6 +82,62 @@ export default function RootLayout() {
           }}
         />
         <Stack.Screen
+          name="messages/[id]"
+          options={{
+            headerShown: true,
+            title: 'Message',
+            headerBackTitle: 'Back',
+            headerShadowVisible: false,
+            headerTintColor: colors.ink,
+            headerStyle: { backgroundColor: colors.background },
+          }}
+        />
+        <Stack.Screen
+          name="chats/index"
+          options={{
+            headerShown: true,
+            title: 'Chats',
+            headerBackTitle: 'Back',
+            headerShadowVisible: false,
+            headerTintColor: colors.ink,
+            headerStyle: { backgroundColor: colors.background },
+          }}
+        />
+        <Stack.Screen
+          name="groups/index"
+          options={{
+            headerShown: true,
+            title: 'Groups',
+            headerBackTitle: 'Back',
+            headerShadowVisible: false,
+            headerTintColor: colors.ink,
+            headerStyle: { backgroundColor: colors.background },
+          }}
+        />
+        <Stack.Screen
+          name="groups/new"
+          options={{
+            headerShown: true,
+            presentation: 'modal',
+            title: 'New group',
+            headerBackTitle: 'Close',
+            headerShadowVisible: false,
+            headerTintColor: colors.ink,
+            headerStyle: { backgroundColor: colors.background },
+          }}
+        />
+        <Stack.Screen
+          name="groups/[id]"
+          options={{
+            headerShown: true,
+            title: '',
+            headerBackTitle: 'Back',
+            headerShadowVisible: false,
+            headerTintColor: colors.ink,
+            headerStyle: { backgroundColor: colors.background },
+          }}
+        />
+        <Stack.Screen
           name="user/[id]"
           options={{
             headerShown: true,

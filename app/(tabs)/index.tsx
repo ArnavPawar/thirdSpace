@@ -2,7 +2,7 @@ import React, { useCallback, useState } from 'react';
 import { ActivityIndicator, Alert, FlatList, RefreshControl, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router, useFocusEffect } from 'expo-router';
-import { Globe, Plus, Users } from 'lucide-react-native';
+import { Globe, MessageCircle, Plus, Users } from 'lucide-react-native';
 import FeedCard from '@/components/FeedCard';
 import { EmptyState, IconButton, ScreenHeader, SegmentedControl } from '@/components/ui';
 import { listRecentActivity, toggleFollow } from '@/lib/data';
@@ -71,7 +71,13 @@ export default function FeedScreen() {
             <ScreenHeader
               title="Feed"
               subtitle="Fresh takes on spots around you"
-              right={<IconButton icon={Plus} onPress={() => router.push('/rank' as never)} accessibilityLabel="Rate a spot" />}
+              right={(
+                <View className="flex-row gap-2">
+                  <IconButton icon={MessageCircle} onPress={() => router.push('/chats' as never)} accessibilityLabel="Chats" />
+                  <IconButton icon={Users} onPress={() => router.push('/groups' as never)} accessibilityLabel="Groups" />
+                  <IconButton icon={Plus} onPress={() => router.push('/rank' as never)} accessibilityLabel="Rate a spot" />
+                </View>
+              )}
             />
             <SegmentedControl
               style={{ marginHorizontal: 20 }}
