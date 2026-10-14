@@ -14,10 +14,10 @@ export function getDirectionsUrl(space: SpaceWithAttributes) {
   const coordinate = `${space.latitude},${space.longitude}`;
 
   if (Platform.OS === 'ios') {
-    return `http://maps.apple.com/?ll=${coordinate}&q=${label}`;
+    return `http://maps.apple.com/?daddr=${coordinate}&q=${label}`;
   }
 
-  return `https://www.google.com/maps/search/?api=1&query=${coordinate}&query_place_id=${label}`;
+  return `https://www.google.com/maps/dir/?api=1&destination=${coordinate}`;
 }
 
 export async function openDirections(space: SpaceWithAttributes) {
