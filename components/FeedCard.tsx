@@ -8,9 +8,9 @@ import { PhotoThumbnails, pickPhotos } from '@/components/PhotoPickerRow';
 import PhotoViewer from '@/components/PhotoViewer';
 import { Avatar, CategoryIcon, ScorePill, VibeTitleChip } from '@/components/ui';
 import { useAuth } from '@/lib/auth';
-import { addComment, listComments, toggleLike } from '@/lib/data';
+import { addComment, listComments, removeReviewCompanion, toggleLike } from '@/lib/data';
 import { formatTimeAgo, getDisplayName } from '@/lib/format';
-import { openProfile } from '@/lib/links';
+import { openGroup, openProfile } from '@/lib/links';
 import { CATEGORY_META, colors } from '@/lib/theme';
 import { MAX_PHOTOS_PER_POST, type FeedActivity, type LocalPhoto, type ReviewComment, type ReviewPhoto } from '@/types/space';
 
@@ -32,8 +32,21 @@ export default function FeedCard({ item, onToggleFollow, showSpace = true, linkA
   const [draftPhotos, setDraftPhotos] = useState<LocalPhoto[]>([]);
   const [isPosting, setIsPosting] = useState(false);
   const [viewer, setViewer] = useState<{ photos: ReviewPhoto[]; index: number } | null>(null);
+  const [removedCompanionIds, setRemovedCompanionIds] = useState<string[]>([]);
 
   const name = getDisplayName(item.profile);
+  const companions = (item.companions || []).filter((profile) => !removedCompanionIds.includes(profile.user_id));
+  const groups = item.groups || [];
+
+  const removeCompanion = async (companionId: string) => {
+    setRemovedCompanionIds((current) => [...current, companionId]);
+    try {
+      await removeReviewCompanion(userId, item.id);
+    } catch (error) {
+      setRemovedCompanionIds((current) => current.filter((id) => id !== companionId));
+      Alert.alert('Could not remove you', error instanceof Error ? error.message : 'Please try again.');
+    }
+  };
   const isOwnReview = item.user_id === userId;
 
   const handleLike = async () => {
@@ -123,6 +136,41 @@ export default function FeedCard({ item, onToggleFollow, showSpace = true, linkA
           </TouchableOpacity>
         )}
       </View>
+
+      {(companions.length > 0 || groups.length > 0) && (
+        <View className="px-4 mt-2 flex-row flex-wrap items-center">
+          <Text className="text-xs text-slate-500 mr-1">with</Text>
+          {companions.map((profile, index) => {
+            const companionName = getDisplayName(profile);
+            const mine = profile.user_id === userId;
+            return (
+              <View key={profile.user_id} className="flex-row items-center">
+                {index > 0 && <Text className="text-xs text-slate-400 mr-1">,</Text>}
+                <TouchableOpacity onPress={() => openProfile(profile.user_id, userId)} disabled={!linkAuthor}>
+                  <Text className="text-xs font-semibold text-ink">{companionName}</Text>
+                </TouchableOpacity>
+                {mine && (
+                  <TouchableOpacity
+                    onPress={() => removeCompanion(profile.user_id)}
+                    accessibilityLabel="Remove yourself from this review"
+                    className="ml-1"
+                  >
+                    <Text className="text-xs text-slate-400">×</Text>
+                  </TouchableOpacity>
+                )}
+              </View>
+            );
+          })}
+          {groups.map((group, index) => (
+            <View key={group.id} className="flex-row items-center">
+              {(companions.length > 0 || index > 0) && <Text className="text-xs text-slate-400 mx-1">·</Text>}
+              <TouchableOpacity onPress={() => openGroup(group.id)}>
+                <Text className="text-xs font-semibold text-primary">{group.name}</Text>
+              </TouchableOpacity>
+            </View>
+          ))}
+        </View>
+      )}
 
       {showSpace && (
         <TouchableOpacity

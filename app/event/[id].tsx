@@ -93,11 +93,13 @@ function EventRecap({
   userId,
   isHost,
   onOpenDate,
+  onOpenPeople,
 }: {
   event: SpaceEvent;
   userId: string;
   isHost: boolean;
   onOpenDate: (date: string) => void;
+  onOpenPeople: () => void;
 }) {
   const occurrence = event.occurrence_date || event.event_date;
   const when = occurrence ? formatEventWhen({ ...event, kind: 'one_time' }, occurrence) : undefined;
@@ -136,12 +138,21 @@ function EventRecap({
       </View>
 
       {crowd.length > 0 && (
-        <View className="mt-4">
-          <Text className="text-[12px] font-semibold text-slate-400 uppercase mb-2">
-            {event.here.length > 0 ? 'Who showed up' : 'Who was going'}
-          </Text>
+        <TouchableOpacity
+          onPress={onOpenPeople}
+          activeOpacity={0.7}
+          accessibilityRole="button"
+          accessibilityLabel={event.here.length > 0 ? 'See who showed up' : 'See who was going'}
+          className="mt-4"
+        >
+          <View className="flex-row items-center mb-2">
+            <Text className="text-[12px] font-semibold text-slate-400 uppercase flex-1">
+              {event.here.length > 0 ? 'Who showed up' : 'Who was going'}
+            </Text>
+            <ChevronRight size={16} color={colors.subtle} />
+          </View>
           <GoingFaces people={crowd} currentUserId={userId} size={32} />
-        </View>
+        </TouchableOpacity>
       )}
 
       <Text className="text-[13px] text-slate-500 mt-4 leading-[18px]">
@@ -532,7 +543,16 @@ export default function EventDetailScreen() {
         )}
 
         {!event.cancelled_at && ended && (
-          <EventRecap event={event} userId={userId} isHost={isHost} onOpenDate={(next) => router.setParams({ date: next })} />
+          <EventRecap
+            event={event}
+            userId={userId}
+            isHost={isHost}
+            onOpenDate={(next) => router.setParams({ date: next })}
+            onOpenPeople={() => {
+              if (event.here.length > 0) setShowHere(true);
+              else setShowGoing(true);
+            }}
+          />
         )}
 
         {!event.cancelled_at && !ended && (
@@ -690,7 +710,7 @@ export default function EventDetailScreen() {
       />
       <PeopleListSheet
         visible={showHere}
-        title={`${event.here_count} here now`}
+        title={ended ? `${event.here_count} checked in` : `${event.here_count} here now`}
         people={event.here}
         currentUserId={userId}
         onClose={() => setShowHere(false)}

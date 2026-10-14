@@ -6,6 +6,7 @@ import { Avatar, CategoryIcon, PrimaryButton, ScorePill, SegmentedControl } from
 import { useAuth } from '@/lib/auth';
 import { requestSecretSpot } from '@/lib/data';
 import { getDisplayName } from '@/lib/format';
+import { openProfile } from '@/lib/links';
 import { CATEGORY_META, colors } from '@/lib/theme';
 import type { SecretAccessStatus, SecretSpotPreview } from '@/types/space';
 
@@ -91,10 +92,19 @@ export default function SecretSpotSheet({ spot, mySecretSpots, onClose, onAccess
 
           <View className="bg-slate-50 rounded-2xl p-4 mt-4">
             <View className="flex-row items-center">
-              <Avatar name={ownerName} size={32} />
-              <Text className="flex-1 ml-2 text-sm text-slate-600">
-                Gatekept by <Text className="font-bold text-ink">{ownerName}</Text>
-              </Text>
+              <TouchableOpacity
+                onPress={() => {
+                  onClose();
+                  openProfile(spot.owner.user_id, userId);
+                }}
+                accessibilityLabel={`View ${ownerName}'s profile`}
+                className="flex-1 flex-row items-center"
+              >
+                <Avatar name={ownerName} size={32} />
+                <Text className="flex-1 ml-2 text-sm text-slate-600">
+                  Gatekept by <Text className="font-bold text-ink">{ownerName}</Text>
+                </Text>
+              </TouchableOpacity>
               {spot.overall_score !== undefined && <ScorePill score={spot.overall_score} size="sm" />}
             </View>
             {spot.area_hint && (

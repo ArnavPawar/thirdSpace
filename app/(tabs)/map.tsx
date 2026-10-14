@@ -468,10 +468,25 @@ export default function MapScreen() {
             <Text className="font-bold text-ink text-base" numberOfLines={1}>
               {isVisible ? spot.space?.name : `Hidden ${CATEGORY_META[spot.category].short.toLowerCase()} spot`}
             </Text>
-            <Text className="text-[13px] text-slate-500 mt-0.5" numberOfLines={1}>
-              {spot.access === 'owner' ? 'Your secret spot' : `Gatekept by ${ownerName.split(' ')[0]}`}
-              {spot.area_hint ? ` · ${spot.area_hint}` : ''}
-            </Text>
+            {spot.access === 'owner' ? (
+              <Text className="text-[13px] text-slate-500 mt-0.5" numberOfLines={1}>
+                Your secret spot{spot.area_hint ? ` · ${spot.area_hint}` : ''}
+              </Text>
+            ) : (
+              <View className="flex-row items-center mt-0.5">
+                <Text className="text-[13px] text-slate-500">Gatekept by </Text>
+                <TouchableOpacity
+                  onPress={() => openProfile(spot.owner.user_id, userId)}
+                  accessibilityLabel={`View ${ownerName}'s profile`}
+                  hitSlop={6}
+                >
+                  <Text className="text-[13px] font-semibold text-ink">{ownerName.split(' ')[0]}</Text>
+                </TouchableOpacity>
+                {spot.area_hint ? (
+                  <Text className="text-[13px] text-slate-500 flex-1" numberOfLines={1}>{` · ${spot.area_hint}`}</Text>
+                ) : null}
+              </View>
+            )}
           </View>
           {spot.overall_score !== undefined && <ScorePill score={spot.overall_score} size="sm" />}
         </View>

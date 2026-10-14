@@ -92,7 +92,7 @@ export default function TabLayout() {
             <CalendarTabButton
               onPress={props.onPress}
               onLongPress={props.onLongPress}
-              selected={Boolean(props['aria-selected'])}
+              selected={Boolean(props.accessibilityState?.selected || props['aria-selected'])}
             />
           ),
         }}
