@@ -236,7 +236,7 @@ export default function GroupDetailScreen() {
             {tab === 'feed' && (
               <View className="mt-4">
                 {detail.feed.length === 0 ? (
-                  <EmptyState icon={Users} title="No posts yet" body="Reviews from members show up here." />
+                  <EmptyState icon={Users} title="No posts yet" body="Reviews show up here when someone tags this group." />
                 ) : detail.feed.map((item) => (
                   <View key={item.id} className="mb-3">
                     <FeedCard item={item} />
@@ -248,7 +248,7 @@ export default function GroupDetailScreen() {
             {tab === 'map' && (
               <View className="mt-4">
                 {detail.spots.length === 0 ? (
-                  <EmptyState icon={MapPin} title="No spots yet" body="Member reviews, hangouts, and saved places land on this map." />
+                  <EmptyState icon={MapPin} title="No spots yet" body="Tagged reviews, hangouts posted here, and saved places land on this map." />
                 ) : (
                   <>
                     <View className="h-64 rounded-3xl overflow-hidden border border-slate-200">
@@ -294,7 +294,7 @@ export default function GroupDetailScreen() {
                   <EmptyState
                     icon={CalendarDays}
                     title="No hangouts yet"
-                    body="Post one to this group when you host it, instead of inviting each person."
+                    body="Hangouts someone posts to this group show up here. A member's own night out does not."
                     actionLabel="Host an event"
                     onAction={() => router.push('/event/new' as never)}
                   />

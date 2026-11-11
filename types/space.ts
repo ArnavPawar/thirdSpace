@@ -442,11 +442,19 @@ export interface ReviewComment {
   photos?: ReviewPhoto[];
 }
 
+export interface ReviewGroupTag {
+  id: string;
+  name: string;
+  visibility: GroupVisibility;
+}
+
 export interface FeedActivity extends UserRating {
   space: SpaceWithAttributes;
   profile: Profile;
   is_following?: boolean;
   photos?: ReviewPhoto[];
+  companions?: Profile[];
+  groups?: ReviewGroupTag[];
 }
 
 export interface ProfileStats {
@@ -480,6 +488,8 @@ export interface SubmitRatingInput {
   rating: RatingFormData;
   secret?: { area_hint?: string };
   photos?: LocalPhoto[];
+  companionIds?: string[];
+  groupIds?: string[];
 }
 
 export interface LocalPhoto {

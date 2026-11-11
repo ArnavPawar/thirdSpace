@@ -71,9 +71,6 @@ export default function ChatsScreen() {
             {threads.length === 0 ? (
               <Text className="text-[14px] text-slate-500 mb-6">Hangout chats show up here when you are going, hosting, or checked in.</Text>
             ) : threads.map((thread) => {
-              const preview = thread.last_message
-                ? `${getDisplayName(thread.last_message.profile)}: ${thread.last_message.body}`
-                : 'No messages yet';
               const open = thread.kind === 'here' ? openHereChat : openEventChat;
               return (
                 <TouchableOpacity
@@ -101,7 +98,11 @@ export default function ChatsScreen() {
                         {thread.kind === 'here' ? 'Here now · deletes when it ends · ' : ''}
                         {thread.event.space.name} · {formatEventWhen(thread.event, thread.occurrence_date)}
                       </Text>
-                      <Text className="text-[14px] text-slate-600 mt-1" numberOfLines={2}>{preview}</Text>
+                      <Text className="text-[14px] text-slate-600 mt-1" numberOfLines={2}>
+                        {thread.last_message
+                          ? `${getDisplayName(thread.last_message.profile)}: ${thread.last_message.body}`
+                          : 'No messages yet'}
+                      </Text>
                     </View>
                   </View>
                 </TouchableOpacity>

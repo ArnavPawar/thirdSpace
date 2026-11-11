@@ -368,6 +368,8 @@ export const demoFeed: FeedActivity[] = [
     created_at: '2026-05-25T10:30:00Z',
     space: demoSpaces[0],
     profile: demoProfiles[0],
+    companions: [demoProfiles[1]],
+    groups: [{ id: 'group-company', name: 'Company hangout', visibility: 'private' }],
   },
   {
     id: 'rating-2',
@@ -385,6 +387,8 @@ export const demoFeed: FeedActivity[] = [
     space: demoSpaces[3],
     profile: demoProfiles[1],
     is_following: true,
+    companions: [demoProfiles[0]],
+    groups: [{ id: 'group-company', name: 'Company hangout', visibility: 'private' }],
   },
   {
     id: 'rating-3',
@@ -487,6 +491,15 @@ export const demoFeed: FeedActivity[] = [
     space: demoSpaces[0],
     profile: demoProfiles[3],
     is_following: true,
+    // Mike is in Company hangout. Emma and Maya are not, so a group feed only keeps Mike.
+    // You are in Company hangout, not Dorm crew, so the home feed hides Dorm crew.
+    companions: [demoProfiles[1], demoProfiles[2], demoCrowdProfiles.find((profile) => profile.user_id === 'user-maya')!],
+    groups: [
+      { id: 'group-arlington', name: 'Arlington girls', visibility: 'public' },
+      { id: 'group-book-club', name: 'Sunday book club', visibility: 'public' },
+      { id: 'group-company', name: 'Company hangout', visibility: 'private' },
+      { id: 'group-dorm', name: 'Dorm crew', visibility: 'private' },
+    ],
   },
   {
     id: 'rating-9',

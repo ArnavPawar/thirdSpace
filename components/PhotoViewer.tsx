@@ -3,7 +3,9 @@ import { FlatList, Modal, Text, TouchableOpacity, useWindowDimensions, View } fr
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Image } from 'expo-image';
 import { X } from 'lucide-react-native';
+import { useAuth } from '@/lib/auth';
 import { formatTimeAgo, getDisplayName } from '@/lib/format';
+import { openProfile } from '@/lib/links';
 import type { ReviewPhoto } from '@/types/space';
 
 interface PhotoViewerProps {
@@ -14,6 +16,7 @@ interface PhotoViewerProps {
 }
 
 export default function PhotoViewer({ photos, initialIndex, onClose, onOpenReview }: PhotoViewerProps) {
+  const { userId } = useAuth();
   const { width, height } = useWindowDimensions();
   const [index, setIndex] = useState(initialIndex ?? 0);
   const isOpen = initialIndex !== null && photos.length > 0;
@@ -63,7 +66,13 @@ export default function PhotoViewer({ photos, initialIndex, onClose, onOpenRevie
           {current && (
             <View className="mx-4 mb-3 bg-black/60 rounded-2xl px-4 py-3 flex-row items-center">
               <View className="flex-1">
-                <Text className="text-white font-semibold">
+                <Text
+                  className="text-white font-semibold"
+                  onPress={() => {
+                    onClose();
+                    openProfile(current.user_id, userId);
+                  }}
+                >
                   {getDisplayName(current.profile)}
                 </Text>
                 <Text className="text-white/60 text-xs mt-0.5">

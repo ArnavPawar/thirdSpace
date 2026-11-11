@@ -43,10 +43,11 @@ npm install
 7. Run `supabase/event-chat.sql` for the group chats that open for people going to an event. Enable the `pg_cron` extension first if you want expired chats purged nightly
 8. Run `supabase/live-chat.sql` for the temporary chat among people who are checked in, and for private messages
 9. Run `supabase/groups.sql` for crews: public and private groups, posting a hangout to a group, and in-app invites. If you re-run `hosted-events.sql` later, run `groups.sql` again
-10. In Authentication → URL Configuration, add `thirdspace://**` and `exp://**` to Redirect URLs
-11. Update your `.env` file with the project URL and anon key
-12. Optional: sign in to the app once, then run `supabase/seed-demo-events.sql` for demo hangouts, private invites with RSVP caps, duplicate trivia/run club reviews, and fake headcounts. The most recently created non-demo profile is used as "you". It's safe to re-run
-13. Optional: run `supabase/seed-demo-groups.sql` after `groups.sql` and `seed-demo-social.sql`. Then `nina.nights@example.com` / `password123` owns Arlington girls, belongs to the private Company hangout, can discover Rosslyn run club, and has Emma's Picnic crew invite on Profile
+10. Run `supabase/review-tags.sql` so a review can say which friends or groups you were with. A group's feed then shows those reviews, not every member's posts
+11. In Authentication → URL Configuration, add `thirdspace://**` and `exp://**` to Redirect URLs
+12. Update your `.env` file with the project URL and anon key
+13. Optional: sign in to the app once, then run `supabase/seed-demo-events.sql` for demo hangouts, private invites with RSVP caps, duplicate trivia/run club reviews, and fake headcounts. The most recently created non-demo profile is used as "you". It's safe to re-run
+14. Optional: run `supabase/seed-demo-groups.sql` after `groups.sql` and `seed-demo-social.sql`. Then `nina.nights@example.com` / `password123` owns Arlington girls, belongs to the private Company hangout, can discover Rosslyn run club, and has Emma's Picnic crew invite on Profile
 
 ### 4. Run the App
 

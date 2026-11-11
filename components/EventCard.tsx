@@ -7,7 +7,7 @@ import PeopleListSheet from '@/components/PeopleListSheet';
 import { useAuth } from '@/lib/auth';
 import { formatEventTime, getEventPhase, isHostedEvent, parseDateKey, WEEKDAY_NAMES } from '@/lib/events';
 import { formatDistance, getDisplayName } from '@/lib/format';
-import { openDirectMessage, openEvent, openHereChat } from '@/lib/links';
+import { openDirectMessage, openEvent, openHereChat, openProfile } from '@/lib/links';
 import { CATEGORY_META, colors } from '@/lib/theme';
 import type { CalendarOccurrence } from '@/types/space';
 
@@ -85,9 +85,21 @@ export default function EventCard({ occurrence, showRecurrence = false }: EventC
             </TouchableOpacity>
           )}
           {isEnded && (
-            <View className="rounded-full px-2 py-0.5 ml-2 bg-slate-100">
-              <Text className="text-[10px] font-bold text-slate-500">Ended</Text>
-            </View>
+            <TouchableOpacity
+              onPress={() => {
+                if (event.here.length > 0) setShowHere(true);
+                else if (event.going.length > 0) setShowGoing(true);
+              }}
+              disabled={event.here.length === 0 && event.going.length === 0}
+              hitSlop={6}
+              accessibilityRole="button"
+              accessibilityLabel={event.here_count > 0 ? `See who showed up, ${event.here_count} checked in` : 'See who was going'}
+              className="rounded-full px-2 py-0.5 ml-2 bg-slate-100"
+            >
+              <Text className="text-[10px] font-bold text-slate-500">
+                {event.here_count > 0 ? `Ended · ${event.here_count} there` : 'Ended'}
+              </Text>
+            </TouchableOpacity>
           )}
           {isWeekly && !isLive && !isEnded && (
             <View style={{ backgroundColor: colors.primarySoft }} className="flex-row items-center rounded-full px-2 py-0.5 ml-2">
@@ -150,14 +162,27 @@ export default function EventCard({ occurrence, showRecurrence = false }: EventC
                 </TouchableOpacity>
               </>
             ) : (
-              <Text numberOfLines={1} className="text-[11px] font-semibold text-slate-400 flex-shrink">
-                {event.going_count > 0 ? `${event.going_count} ${goingLabel} · ` : ''}
-                {event.source_type === 'space'
-                  ? 'Mentioned in the place description'
-                  : mentions > 1
-                    ? `Mentioned in ${mentions} reviews`
-                    : `Mentioned in reviews · ${event.profile?.username ? `@${event.profile.username}` : getDisplayName(event.profile)}`}
-              </Text>
+              <View className="flex-row items-center flex-shrink">
+                <Text numberOfLines={1} className="text-[11px] font-semibold text-slate-400">
+                  {event.going_count > 0 ? `${event.going_count} ${goingLabel} · ` : ''}
+                  {event.source_type === 'space'
+                    ? 'Mentioned in the place description'
+                    : mentions > 1
+                      ? `Mentioned in ${mentions} reviews`
+                      : 'Mentioned in reviews'}
+                </Text>
+                {event.source_type !== 'space' && mentions <= 1 && (event.profile?.user_id || event.source_user_id) && (
+                  <TouchableOpacity
+                    onPress={() => openProfile((event.profile?.user_id || event.source_user_id) as string, userId)}
+                    accessibilityLabel={`View ${getDisplayName(event.profile)}'s profile`}
+                    hitSlop={6}
+                  >
+                    <Text className="text-[11px] font-semibold text-ink">
+                      {` · ${event.profile?.username ? `@${event.profile.username}` : getDisplayName(event.profile)}`}
+                    </Text>
+                  </TouchableOpacity>
+                )}
+              </View>
             )}
           </View>
           {event.link_url && (
@@ -187,7 +212,7 @@ export default function EventCard({ occurrence, showRecurrence = false }: EventC
     />
     <PeopleListSheet
       visible={showHere}
-      title={`${event.here_count} here now`}
+      title={isEnded ? `${event.here_count} checked in` : `${event.here_count} here now`}
       people={event.here}
       currentUserId={userId}
       onClose={() => setShowHere(false)}

@@ -3,10 +3,11 @@ import { ActivityIndicator, Alert, Pressable, RefreshControl, ScrollView, Text, 
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router, useFocusEffect } from 'expo-router';
 import * as Location from 'expo-location';
-import { CalendarDays, ChevronDown, ChevronUp, Globe, Lock, MessageSquareQuote, Plus, Repeat, type LucideIcon } from 'lucide-react-native';
+import { CalendarDays, ChevronDown, ChevronUp, Globe, Lock, MapPin, MessageSquareQuote, Plus, Repeat, type LucideIcon } from 'lucide-react-native';
 import EventCard from '@/components/EventCard';
 import MonthGrid from '@/components/MonthGrid';
-import RangeBar, { RANGE_STOPS } from '@/components/RangeBar';
+import PlaceLensSheet, { type CalendarPlace } from '@/components/PlaceLensSheet';
+import RangeBar, { MAX_RANGE_MILES, RANGE_STOPS } from '@/components/RangeBar';
 import { Chip, EmptyState, ScreenHeader, SectionTitle } from '@/components/ui';
 import { useAuth } from '@/lib/auth';
 import { listEventsNearby } from '@/lib/data';
@@ -40,8 +41,14 @@ export default function CalendarScreen() {
   const [radius, setRadius] = useState(DEFAULT_RADIUS);
   const [queryRadius, setQueryRadius] = useState(DEFAULT_RADIUS);
   const [isDraggingRange, setIsDraggingRange] = useState(false);
-  const [center, setCenter] = useState(ARLINGTON);
+  const [deviceCenter, setDeviceCenter] = useState(ARLINGTON);
+  const [place, setPlace] = useState<CalendarPlace | null>(null);
+  const [anywhere, setAnywhere] = useState(false);
+  const [showPlaceSheet, setShowPlaceSheet] = useState(false);
   const [hasUserLocation, setHasUserLocation] = useState(false);
+  const anywhereRef = useRef(false);
+  const radiusBeforeAnywhereRef = useRef<number | null>(null);
+  const center = place ?? deviceCenter;
   const [allOccurrences, setOccurrences] = useState<CalendarOccurrence[]>([]);
   const [sourceFilter, setSourceFilter] = useState<SourceFilter>('all');
   const [isLoading, setIsLoading] = useState(true);
@@ -64,7 +71,7 @@ export default function CalendarScreen() {
         if (status !== Location.PermissionStatus.GRANTED) return;
         const position = await Location.getLastKnownPositionAsync() || await Location.getCurrentPositionAsync({});
         if (!position) return;
-        setCenter({ latitude: position.coords.latitude, longitude: position.coords.longitude });
+        setDeviceCenter({ latitude: position.coords.latitude, longitude: position.coords.longitude });
         setHasUserLocation(true);
       } catch {
         // Falls back to the default area.
@@ -75,7 +82,14 @@ export default function CalendarScreen() {
   const load = useCallback(async (force = false) => {
     const id = ++requestId.current;
     try {
-      const next = await listEventsNearby({ monthStart, center, radiusMiles: queryRadius, viewerId: userId, includePrivate: true, force });
+      const next = await listEventsNearby({
+        monthStart,
+        center,
+        radiusMiles: anywhere ? null : queryRadius,
+        viewerId: userId,
+        includePrivate: true,
+        force,
+      });
       if (id === requestId.current) setOccurrences(next);
     } catch {
       Alert.alert('Calendar Error', 'Could not load events nearby.');
@@ -85,13 +99,78 @@ export default function CalendarScreen() {
         setRefreshing(false);
       }
     }
-  }, [center, monthStart, queryRadius, userId]);
+  }, [anywhere, center, monthStart, queryRadius, userId]);
 
   useFocusEffect(
     useCallback(() => {
       load();
     }, [load])
   );
+
+  useFocusEffect(useCallback(() => () => {
+    if (!anywhereRef.current || radiusBeforeAnywhereRef.current == null) return;
+    const restored = radiusBeforeAnywhereRef.current;
+    radiusBeforeAnywhereRef.current = null;
+    anywhereRef.current = false;
+    setAnywhere(false);
+    setRadius(restored);
+    setQueryRadius(restored);
+  }, []));
+
+  const chooseNearYou = () => {
+    setPlace(null);
+    if (radiusBeforeAnywhereRef.current != null) {
+      setRadius(radiusBeforeAnywhereRef.current);
+      setQueryRadius(radiusBeforeAnywhereRef.current);
+      radiusBeforeAnywhereRef.current = null;
+    }
+    anywhereRef.current = false;
+    setAnywhere(false);
+    setShowPlaceSheet(false);
+  };
+
+  const choosePlace = (next: CalendarPlace) => {
+    setPlace(next);
+    if (radiusBeforeAnywhereRef.current != null) {
+      setRadius(radiusBeforeAnywhereRef.current);
+      setQueryRadius(radiusBeforeAnywhereRef.current);
+      radiusBeforeAnywhereRef.current = null;
+    }
+    anywhereRef.current = false;
+    setAnywhere(false);
+    setShowPlaceSheet(false);
+  };
+
+  const chooseAnywhere = () => {
+    if (!anywhereRef.current) radiusBeforeAnywhereRef.current = radius;
+    anywhereRef.current = true;
+    setAnywhere(true);
+    setShowPlaceSheet(false);
+  };
+
+  const changeRadius = (next: number) => {
+    if (anywhereRef.current) {
+      anywhereRef.current = false;
+      radiusBeforeAnywhereRef.current = null;
+      setAnywhere(false);
+    }
+    setRadius(next);
+  };
+
+  const placeLabel = anywhere
+    ? 'Anywhere'
+    : place
+      ? place.label
+      : hasUserLocation
+        ? 'Near you'
+        : 'Arlington';
+  const placeSubtitle = anywhere
+    ? 'Anywhere · distance is off'
+    : place
+      ? `What's happening around ${place.label}`
+      : hasUserLocation
+        ? "What's happening near you"
+        : "What's happening around Arlington, VA";
 
   const onRefresh = useCallback(() => {
     setRefreshing(true);
@@ -184,7 +263,7 @@ export default function CalendarScreen() {
       >
         <ScreenHeader
           title="Calendar"
-          subtitle={hasUserLocation ? "What's happening near you" : "What's happening around Arlington, VA"}
+          subtitle={placeSubtitle}
           right={(
             <Pressable
               onPress={() => router.push('/event/new' as never)}
@@ -199,11 +278,21 @@ export default function CalendarScreen() {
         />
 
         <View className="px-4 gap-3">
+          <Pressable
+            onPress={() => setShowPlaceSheet(true)}
+            accessibilityRole="button"
+            accessibilityLabel={`Calendar place, ${placeLabel}`}
+            className="self-start flex-row items-center bg-white border border-slate-200 rounded-full px-3 h-10"
+          >
+            <MapPin size={15} color={colors.primary} />
+            <Text className="font-semibold text-ink ml-1.5">{placeLabel}</Text>
+            <ChevronDown size={16} color={colors.muted} />
+          </Pressable>
           <RangeBar
             value={radius}
-            onChange={setRadius}
+            onChange={changeRadius}
             onDraggingChange={setIsDraggingRange}
-            eventCount={isLoading ? undefined : eventCount}
+            eventCount={isLoading || anywhere ? undefined : eventCount}
           />
           <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8 }} className="-mx-4 px-4">
             {SOURCE_FILTERS.map((filter) => {
@@ -249,14 +338,21 @@ export default function CalendarScreen() {
           <View className="px-4 mt-5">
             <EmptyState
               icon={CalendarDays}
-              title="Nothing on the calendar nearby"
-              body="Host a hangout, or widen the range. Review mentions like trivia night still show up here too."
+              title={anywhere ? 'Nothing on the calendar this month' : 'Nothing on the calendar nearby'}
+              body={anywhere
+                ? 'Host a hangout, or look around a specific place. Review mentions like trivia night still show up here too.'
+                : 'Host a hangout, or widen the range. Review mentions like trivia night still show up here too.'}
               actionLabel="Create event"
               onAction={() => router.push('/event/new' as never)}
             />
-            {nextWiderRadius && (
+            {nextWiderRadius && !anywhere && (
               <Pressable onPress={() => setRadius(nextWiderRadius)} className="items-center mt-3">
                 <Text className="text-primary font-semibold">Widen to {nextWiderRadius} mi</Text>
+              </Pressable>
+            )}
+            {!anywhere && radius >= MAX_RANGE_MILES && (
+              <Pressable onPress={() => setShowPlaceSheet(true)} className="items-center mt-3">
+                <Text className="text-primary font-semibold">Look around another place</Text>
               </Pressable>
             )}
           </View>
@@ -287,7 +383,9 @@ export default function CalendarScreen() {
                 >
                   <View className="flex-row items-center">
                     <Repeat size={16} color={colors.primary} />
-                    <Text className="text-[17px] font-bold text-ink ml-2">Every week nearby</Text>
+                    <Text className="text-[17px] font-bold text-ink ml-2">
+                      {anywhere ? 'Every week' : place ? `Every week around ${place.label}` : 'Every week nearby'}
+                    </Text>
                     <Text className="text-[13px] font-semibold text-slate-400 ml-2">{weeklyEvents.length}</Text>
                   </View>
                   {showWeekly ? <ChevronUp size={18} color={colors.muted} /> : <ChevronDown size={18} color={colors.muted} />}
@@ -304,6 +402,13 @@ export default function CalendarScreen() {
           </View>
         )}
       </ScrollView>
+      <PlaceLensSheet
+        visible={showPlaceSheet}
+        onClose={() => setShowPlaceSheet(false)}
+        onNearYou={chooseNearYou}
+        onAnywhere={chooseAnywhere}
+        onPlace={choosePlace}
+      />
     </SafeAreaView>
   );
 }

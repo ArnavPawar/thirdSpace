@@ -3,7 +3,9 @@ import { ActivityIndicator, Modal, ScrollView, Text, TouchableOpacity, View } fr
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Check, Copy, Share2, X } from 'lucide-react-native';
 import { Avatar } from '@/components/ui';
+import { useAuth } from '@/lib/auth';
 import { getDisplayName } from '@/lib/format';
+import { openProfile } from '@/lib/links';
 import { colors } from '@/lib/theme';
 import type { InviteStatus, Profile } from '@/types/space';
 
@@ -30,6 +32,7 @@ export default function InviteSheet({
   onShare: () => void;
   onInvite: (userId: string) => void;
 }) {
+  const { userId } = useAuth();
   return (
     <Modal visible={visible} animationType="slide" presentationStyle="pageSheet" onRequestClose={onClose}>
       <SafeAreaView className="flex-1 bg-slate-50">
@@ -66,11 +69,20 @@ export default function InviteSheet({
               const already = status === 'pending' || status === 'accepted';
               return (
                 <View key={person.user_id} className="flex-row items-center bg-white border border-slate-200 rounded-2xl px-3 py-3 mb-2">
-                  <Avatar name={getDisplayName(person)} size={40} />
-                  <View className="flex-1 ml-3">
-                    <Text className="font-bold text-ink">{getDisplayName(person)}</Text>
-                    {person.username && <Text className="text-[13px] text-slate-500">@{person.username}</Text>}
-                  </View>
+                  <TouchableOpacity
+                    onPress={() => {
+                      onClose();
+                      openProfile(person.user_id, userId);
+                    }}
+                    accessibilityLabel={`View ${getDisplayName(person)}'s profile`}
+                    className="flex-row items-center flex-1"
+                  >
+                    <Avatar name={getDisplayName(person)} size={40} />
+                    <View className="flex-1 ml-3">
+                      <Text className="font-bold text-ink">{getDisplayName(person)}</Text>
+                      {person.username && <Text className="text-[13px] text-slate-500">@{person.username}</Text>}
+                    </View>
+                  </TouchableOpacity>
                   <TouchableOpacity
                     disabled={already}
                     onPress={() => onInvite(person.user_id)}

@@ -3,6 +3,7 @@ import {
   ActivityIndicator,
   Alert,
   KeyboardAvoidingView,
+  Modal,
   Platform,
   ScrollView,
   Switch,
@@ -16,13 +17,14 @@ import { router, useFocusEffect, useLocalSearchParams } from 'expo-router';
 import MapView, { Marker } from 'react-native-maps';
 import type { LatLng, MapPressEvent, MarkerDragStartEndEvent, Region } from 'react-native-maps';
 import * as Location from 'expo-location';
-import { ArrowLeft, ArrowRight, Check, CircleCheck, Globe, KeyRound, LocateFixed, MapPin, Search, Send, Sparkles, X } from 'lucide-react-native';
+import { ArrowLeft, ArrowRight, Check, CircleCheck, Globe, KeyRound, LocateFixed, MapPin, Search, Send, Sparkles, Users, X } from 'lucide-react-native';
 import PhotoPickerRow from '@/components/PhotoPickerRow';
 import VibeSlider from '@/components/VibeSlider';
-import { CategoryIcon, Chip, PrimaryButton, ProgressBar, ScorePill } from '@/components/ui';
+import { Avatar, CategoryIcon, Chip, PrimaryButton, ProgressBar, ScorePill } from '@/components/ui';
 import { useAuth } from '@/lib/auth';
-import { getProfile, listSecretSpots, listSpaces, submitRating } from '@/lib/data';
-import { formatDistance } from '@/lib/format';
+import { getProfile, listMyGroups, listSecretSpots, listSocialProfiles, listSpaces, submitRating } from '@/lib/data';
+import { formatDistance, getDisplayName } from '@/lib/format';
+import { openProfile } from '@/lib/links';
 import { buildViewbox, rankSearchResults } from '@/lib/search';
 import { isSupabaseConfigured } from '@/lib/supabase';
 import { CATEGORY_META, colors } from '@/lib/theme';
@@ -35,7 +37,9 @@ import {
   normalizePurposeForCategory,
   SPACE_CATEGORIES,
   type CategoryPurpose,
+  type Group,
   type LocalPhoto,
+  type Profile,
   type RatingFormData,
   type SpaceCategory,
   type SpaceWithAttributes,
@@ -112,6 +116,11 @@ export default function RateScreen() {
   const [isSecret, setIsSecret] = useState(false);
   const [areaHint, setAreaHint] = useState('');
   const [photos, setPhotos] = useState<LocalPhoto[]>([]);
+  const [myGroups, setMyGroups] = useState<Group[]>([]);
+  const [following, setFollowing] = useState<Profile[]>([]);
+  const [withGroupIds, setWithGroupIds] = useState<string[]>([]);
+  const [withPeople, setWithPeople] = useState<Profile[]>([]);
+  const [showWithPeople, setShowWithPeople] = useState(false);
   const [spacesRated, setSpacesRated] = useState(0);
   const [ownedSecretCount, setOwnedSecretCount] = useState(0);
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -126,14 +135,18 @@ export default function RateScreen() {
 
   const loadContext = useCallback(async () => {
     try {
-      const [spaces, profile, secrets] = await Promise.all([
+      const [spaces, profile, secrets, groups, people] = await Promise.all([
         listSpaces({ viewerId: userId }),
         getProfile(userId),
         listSecretSpots(userId),
+        listMyGroups(userId).catch(() => [] as Group[]),
+        listSocialProfiles('following', userId).catch(() => [] as Profile[]),
       ]);
       setKnownSpaces(spaces);
       setSpacesRated(profile.stats.spaces_rated);
       setOwnedSecretCount(secrets.filter((spot) => spot.access === 'owner').length);
+      setMyGroups(groups);
+      setFollowing(people.filter((person) => person.user_id !== userId));
     } catch {
       // The flow still works with OpenStreetMap search if known spaces fail to load.
     }
@@ -329,6 +342,8 @@ export default function RateScreen() {
     setSearchQuery('');
     setRatings(createInitialRatings());
     setPhotos([]);
+    setWithGroupIds([]);
+    setWithPeople([]);
   };
 
   const selectCategory = (category: SpaceCategory) => {
@@ -387,17 +402,22 @@ export default function RateScreen() {
     try {
       const shouldBeSecret = isSecret && !isExistingSpace;
       const before = getVibeProgress(spacesRated);
-      const { failedPhotos } = await submitRating(userId, {
+      const { failedPhotos, failedTags } = await submitRating(userId, {
         space: selectedSpace,
         rating: ratings,
         secret: shouldBeSecret ? { area_hint: areaHint } : undefined,
         photos,
+        companionIds: withPeople.map((person) => person.user_id),
+        groupIds: withGroupIds,
       });
       if (failedPhotos > 0) {
         Alert.alert(
           'Some photos did not upload',
           `Your rating was posted, but ${failedPhotos} ${failedPhotos === 1 ? 'photo' : 'photos'} could not be saved.`
         );
+      }
+      if (failedTags) {
+        Alert.alert('Tags were not saved', 'Your rating was posted, but the people or groups you tagged could not be saved. Run review-tags.sql if you have not yet.');
       }
       const profile = await getProfile(userId);
       setSpacesRated(profile.stats.spaces_rated);
@@ -736,6 +756,40 @@ export default function RateScreen() {
                 textAlignVertical="top"
               />
 
+              <Text className="text-[15px] font-bold text-ink mt-5 mb-2">With</Text>
+              <Text className="text-[13px] text-slate-500 mb-2">Friends and public groups show on the post for everyone, like a tag on a photo. A private group only shows for people in that group.</Text>
+              {myGroups.length > 0 && (
+                <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8 }} className="mb-3">
+                  {myGroups.map((group) => (
+                    <Chip
+                      key={group.id}
+                      label={group.visibility === 'private' ? `${group.name} · private` : group.name}
+                      icon={Users}
+                      selected={withGroupIds.includes(group.id)}
+                      onPress={() => setWithGroupIds((current) => current.includes(group.id)
+                        ? current.filter((id) => id !== group.id)
+                        : [...current, group.id])}
+                    />
+                  ))}
+                </ScrollView>
+              )}
+              {myGroups.some((group) => withGroupIds.includes(group.id) && group.visibility === 'private') && (
+                <Text className="text-[13px] text-slate-500 mb-2">
+                  {myGroups.filter((group) => withGroupIds.includes(group.id) && group.visibility === 'private').map((group) => group.name).join(', ')} won't show for anyone who isn't in that group.
+                </Text>
+              )}
+              <TouchableOpacity
+                onPress={() => setShowWithPeople(true)}
+                className="bg-white border border-slate-200 rounded-2xl px-4 py-3 mb-2 flex-row items-center"
+              >
+                <Users size={16} color={colors.primary} />
+                <Text className="font-semibold text-ink ml-2 flex-1" numberOfLines={1}>
+                  {withPeople.length === 0
+                    ? 'Add friends'
+                    : withPeople.map((person) => getDisplayName(person)).join(', ')}
+                </Text>
+              </TouchableOpacity>
+
               <Text className="text-[15px] font-bold text-ink mt-5">Add photos</Text>
               <Text className="text-[13px] text-slate-500 mt-0.5 mb-2">
                 Up to {MAX_PHOTOS_PER_POST}. They'll show up on this spot's page.
@@ -805,6 +859,52 @@ export default function RateScreen() {
           </View>
         </View>
       </KeyboardAvoidingView>
+
+      <Modal visible={showWithPeople} animationType="slide" presentationStyle="pageSheet" onRequestClose={() => setShowWithPeople(false)}>
+        <SafeAreaView className="flex-1 bg-slate-50">
+          <View className="flex-row items-center justify-between px-5 pt-2 pb-3">
+            <View className="flex-1 pr-3">
+              <Text className="text-[22px] font-extrabold text-ink">With friends</Text>
+              <Text className="text-[13px] text-slate-500 mt-1">People you follow. They can take their name off later.</Text>
+            </View>
+            <TouchableOpacity onPress={() => setShowWithPeople(false)} accessibilityLabel="Done" className="px-3 h-10 rounded-full bg-primary items-center justify-center">
+              <Text className="text-white font-semibold">Done</Text>
+            </TouchableOpacity>
+          </View>
+          <ScrollView contentContainerStyle={{ paddingHorizontal: 20, paddingBottom: 32 }}>
+            {following.length === 0 ? (
+              <Text className="text-slate-500">Follow someone first, then you can tag them here.</Text>
+            ) : following.map((person) => {
+              const selected = withPeople.some((item) => item.user_id === person.user_id);
+              return (
+                <View key={person.user_id} className="flex-row items-center bg-white border border-slate-200 rounded-2xl px-3 py-3 mb-2">
+                  <TouchableOpacity
+                    onPress={() => {
+                      setShowWithPeople(false);
+                      openProfile(person.user_id, userId);
+                    }}
+                    accessibilityLabel={`View ${getDisplayName(person)}'s profile`}
+                  >
+                    <Avatar name={getDisplayName(person)} size={40} />
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    onPress={() => setWithPeople((current) => selected
+                      ? current.filter((item) => item.user_id !== person.user_id)
+                      : [...current, person])}
+                    className="ml-3 flex-1 flex-row items-center"
+                  >
+                    <View className="flex-1">
+                      <Text className="font-bold text-ink">{getDisplayName(person)}</Text>
+                      {person.username ? <Text className="text-[13px] text-slate-500">@{person.username}</Text> : null}
+                    </View>
+                    {selected && <Check size={18} color={colors.primary} />}
+                  </TouchableOpacity>
+                </View>
+              );
+            })}
+          </ScrollView>
+        </SafeAreaView>
+      </Modal>
     </SafeAreaView>
   );
 }

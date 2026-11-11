@@ -33,6 +33,7 @@ import {
   type RatingHistoryEntry,
   type RsvpStatus,
   type ReviewComment,
+  type ReviewGroupTag,
   type ReviewPhoto,
   type SecretAccessStatus,
   type SecretRequestKind,
@@ -97,6 +98,8 @@ type FeedOptions = {
   scope?: FeedScope;
   authorId?: string;
   authorIds?: string[];
+  spaceId?: string;
+  groupId?: string;
 };
 
 type StoredGroup = {
@@ -363,7 +366,7 @@ export async function getSpaceDetails(spaceId: string, viewerId = demoCurrentUse
     || listVisibleLocalSpaces(viewerId).find((item) => item.id === spaceId);
   if (!space) return null;
 
-  const reviews = (await listRecentActivity({ currentUserId: viewerId })).filter((activity) => activity.space_id === spaceId);
+  const reviews = await listRecentActivity({ currentUserId: viewerId, spaceId });
   const comments = localState.comments.filter((comment) => reviews.some((review) => review.id === comment.rating_id));
   const ranking = localState.rankings.find((item) => item.user_id === viewerId && item.space_id === spaceId);
 
@@ -375,20 +378,114 @@ export async function getSpaceDetails(spaceId: string, viewerId = demoCurrentUse
   };
 }
 
+async function fetchFeedEngagement(ratingIds: string[], viewerId: string) {
+  const likes = new Map<string, { count: number; liked: boolean }>();
+  const comments = new Map<string, number>();
+  if (!supabase || ratingIds.length === 0) return { likes, comments };
+
+  const [likeResult, commentResult] = await Promise.all([
+    supabase.from('rating_likes').select('rating_id, user_id').in('rating_id', ratingIds),
+    supabase.from('review_comments').select('rating_id').in('rating_id', ratingIds),
+  ]);
+
+  if (!likeResult.error) {
+    for (const row of (likeResult.data || []) as { rating_id: string; user_id: string }[]) {
+      const current = likes.get(row.rating_id) || { count: 0, liked: false };
+      current.count += 1;
+      if (row.user_id === viewerId) current.liked = true;
+      likes.set(row.rating_id, current);
+    }
+  }
+  if (!commentResult.error) {
+    for (const row of (commentResult.data || []) as { rating_id: string }[]) {
+      comments.set(row.rating_id, (comments.get(row.rating_id) || 0) + 1);
+    }
+  }
+  return { likes, comments };
+}
+
+function visibleGroupTags(groups: ReviewGroupTag[] | undefined, viewerId: string) {
+  if (!groups?.length) return groups;
+  const visible = groups.filter((group) => {
+    if (group.visibility !== 'private' || isUuid(group.id)) return true;
+    seedDemoGroups();
+    return localState.groupMembers.some((member) => member.group_id === group.id && member.user_id === viewerId);
+  });
+  return visible.length === groups.length ? groups : visible;
+}
+
+async function fetchReviewTags(ratingIds: string[]) {
+  const companions = new Map<string, Profile[]>();
+  const groups = new Map<string, ReviewGroupTag[]>();
+  if (!supabase || ratingIds.length === 0) return { companions, groups };
+
+  const [companionResult, groupResult] = await Promise.all([
+    supabase.from('review_companions').select('rating_id, user_id').in('rating_id', ratingIds),
+    supabase.from('review_groups').select('rating_id, groups(id, name, visibility)').in('rating_id', ratingIds),
+  ]);
+
+  if (!companionResult.error) {
+    const rows = (companionResult.data || []) as { rating_id: string; user_id: string }[];
+    const profiles = await fetchProfilesByUserId(rows.map((row) => row.user_id));
+    rows.forEach((row) => {
+      const profile = profiles[row.user_id];
+      if (!profile) return;
+      companions.set(row.rating_id, [...(companions.get(row.rating_id) || []), profile]);
+    });
+  }
+
+  if (!groupResult.error) {
+    ((groupResult.data || []) as { rating_id: string; groups: { id: string; name: string; visibility: string } | { id: string; name: string; visibility: string }[] | null }[]).forEach((row) => {
+      const group = Array.isArray(row.groups) ? row.groups[0] : row.groups;
+      if (!group?.id) return;
+      const tag: ReviewGroupTag = {
+        id: String(group.id),
+        name: String(group.name),
+        visibility: group.visibility === 'public' ? 'public' : 'private',
+      };
+      groups.set(row.rating_id, [...(groups.get(row.rating_id) || []), tag]);
+    });
+  }
+
+  return { companions, groups };
+}
+
+function localReviewTags(userId: string, companionIds: string[] = [], groupIds: string[] = []) {
+  seedDemoGroups();
+  const companions = companionIds
+    .filter((id) => id !== userId && localState.following.has(id))
+    .map((id) => findLocalProfile(id))
+    .filter((profile): profile is Profile => Boolean(profile));
+  const memberGroups = new Set(
+    localState.groupMembers.filter((member) => member.user_id === userId).map((member) => member.group_id)
+  );
+  const groups = groupIds
+    .filter((id) => memberGroups.has(id))
+    .map((id) => (localState.groups || []).find((group) => group.id === id))
+    .filter((group): group is StoredGroup => Boolean(group))
+    .map((group): ReviewGroupTag => ({ id: group.id, name: group.name, visibility: group.visibility }));
+  return { companions, groups };
+}
+
 export async function listRecentActivity(options: FeedOptions = {}): Promise<FeedActivity[]> {
   const scope = options.scope || 'public';
   const currentUserId = options.currentUserId || demoCurrentUserId;
-  const { authorId, authorIds } = options;
+  const { authorId, authorIds, spaceId, groupId } = options;
   const filterFeed = (feed: FeedActivity[]) => {
     let next = authorId ? feed.filter((activity) => activity.user_id === authorId) : feed;
     if (authorIds) {
       const allowed = new Set(authorIds);
       next = next.filter((activity) => allowed.has(activity.user_id));
     }
-    return filterFeedByScope(next, scope);
+    if (spaceId) next = next.filter((activity) => activity.space_id === spaceId);
+    if (groupId) next = next.filter((activity) => activity.groups?.some((group) => group.id === groupId));
+    return filterFeedByScope(next, scope).map((activity) => {
+      const groups = visibleGroupTags(activity.groups, currentUserId);
+      return groups === activity.groups ? activity : { ...activity, groups };
+    });
   };
 
-  if (!isSupabaseConfigured || !supabase) {
+  if (!isSupabaseConfigured || !supabase || (groupId && !isUuid(groupId))) {
     return filterFeed(listRecentActivityFromDemo(currentUserId));
   }
 
@@ -398,10 +495,18 @@ export async function listRecentActivity(options: FeedOptions = {}): Promise<Fee
     .order('created_at', { ascending: false })
     .limit(50);
   if (authorId && isUuid(authorId)) query = query.eq('user_id', authorId);
+  if (spaceId) query = query.eq('space_id', spaceId);
   if (authorIds) {
     const ids = authorIds.filter(isUuid);
     if (ids.length === 0) return filterFeed(listRecentActivityFromDemo(currentUserId));
     query = query.in('user_id', ids);
+  }
+  if (groupId) {
+    const { data: links, error: linkError } = await supabase.from('review_groups').select('rating_id').eq('group_id', groupId);
+    if (linkError) throw new Error(linkError.message);
+    const ids = Array.from(new Set(((links || []) as { rating_id: string }[]).map((row) => row.rating_id)));
+    if (ids.length === 0) return [];
+    query = query.in('id', ids);
   }
 
   const { data, error } = await query;
@@ -415,31 +520,43 @@ export async function listRecentActivity(options: FeedOptions = {}): Promise<Fee
   const profileIds = Array.from(new Set(visibleRows.map((row) => String(row.user_id))));
   const profilesByUserId = await fetchProfilesByUserId(profileIds);
   const followingIds = await fetchFollowingIds(currentUserId);
-  const photosByRatingId = groupPhotosBy(
-    await fetchRemotePhotos('rating_id', visibleRows.map((row) => String(row.id))),
-    'rating_id'
-  );
+  const ratingIds = visibleRows.map((row) => String(row.id));
+  const [photosByRatingId, engagement, reviewTags] = await Promise.all([
+    fetchRemotePhotos('rating_id', ratingIds).then((photos) => groupPhotosBy(photos, 'rating_id')),
+    fetchFeedEngagement(ratingIds, currentUserId),
+    fetchReviewTags(ratingIds),
+  ]);
 
   const remoteFeed = visibleRows.map((rawRow) => {
     const spaceRow = rawRow.spaces as Record<string, unknown>;
-    const profile = profilesByUserId[String(rawRow.user_id)] || demoProfiles[0];
+    const userId = String(rawRow.user_id);
+    const ratingId = String(rawRow.id);
+    const profile = profilesByUserId[userId] || {
+      id: userId,
+      user_id: userId,
+      created_at: String(rawRow.created_at || ''),
+      updated_at: String(rawRow.created_at || ''),
+    };
 
     return {
-      id: String(rawRow.id),
-      user_id: String(rawRow.user_id),
+      id: ratingId,
+      user_id: userId,
       space_id: String(rawRow.space_id),
       category: rawRow.category as SpaceCategory,
       primary_purpose: rawRow.primary_purpose as CategoryPurpose,
       attribute_scores: rawRow.attribute_scores as AttributeScores,
       overall_score: Number(rawRow.overall_score),
       review_text: (rawRow.review_text as string | null) || undefined,
-      likes_count: 0,
-      comments_count: 0,
-      is_following: followingIds.has(String(rawRow.user_id)),
+      likes_count: engagement.likes.get(ratingId)?.count || 0,
+      comments_count: engagement.comments.get(ratingId) || 0,
+      current_user_liked: engagement.likes.get(ratingId)?.liked || false,
+      is_following: followingIds.has(userId),
       created_at: String(rawRow.created_at),
       space: mapSpaceWithAttributesRow(spaceRow),
       profile,
-      photos: photosByRatingId[String(rawRow.id)] || [],
+      photos: photosByRatingId[ratingId] || [],
+      companions: reviewTags.companions.get(ratingId) || [],
+      groups: reviewTags.groups.get(ratingId) || [],
     };
   });
 
@@ -610,7 +727,7 @@ async function fetchProfilesByUserId(userIds: string[]): Promise<Record<string, 
   }, {});
 }
 
-export async function submitRating(userId: string, input: SubmitRatingInput): Promise<{ failedPhotos: number }> {
+export async function submitRating(userId: string, input: SubmitRatingInput): Promise<{ failedPhotos: number; failedTags: boolean }> {
   const category = input.rating.category;
   const primaryPurpose = normalizePurposeForCategory(category, input.rating.primary_purpose);
   const attributeScores = sanitizeAttributeScores(input.rating.attribute_scores);
@@ -663,6 +780,7 @@ export async function submitRating(userId: string, input: SubmitRatingInput): Pr
     localState.events = assignLocalSeries([...existingEvents, ...newEvents]);
     eventCache.clear();
 
+    const tags = localReviewTags(userId, input.companionIds, input.groupIds);
     localState.feed.unshift({
       id: ratingId,
       user_id: userId,
@@ -678,6 +796,8 @@ export async function submitRating(userId: string, input: SubmitRatingInput): Pr
       created_at: timestamp,
       space,
       profile,
+      companions: tags.companions,
+      groups: tags.groups,
     });
     localState.sessionRatings[userId] = (localState.sessionRatings[userId] || 0) + 1;
 
@@ -700,7 +820,7 @@ export async function submitRating(userId: string, input: SubmitRatingInput): Pr
     }
 
     await attachPhotos({ userId, spaceId: space.id, ratingId }, input.photos);
-    return { failedPhotos: 0 };
+    return { failedPhotos: 0, failedTags: false };
   }
 
   const spacePayload = {
@@ -738,6 +858,8 @@ export async function submitRating(userId: string, input: SubmitRatingInput): Pr
   }).select('id, created_at').single();
 
   if (ratingError) throw ratingError;
+
+  const failedTags = await attachRemoteReviewTags(String(ratingRow.id), input.companionIds, input.groupIds);
 
   const failedPhotos = await attachPhotos(
     { userId, spaceId: spaceRow.id, ratingId: String(ratingRow.id) },
@@ -815,7 +937,7 @@ export async function submitRating(userId: string, input: SubmitRatingInput): Pr
     if (rankingError) throw rankingError;
   }
 
-  return { failedPhotos };
+  return { failedPhotos, failedTags };
 }
 
 async function fetchRemoteProfileWithStats(userId: string): Promise<ProfileWithStats | null> {
@@ -1036,6 +1158,33 @@ export async function toggleFavorite(userId: string, space: SpaceWithAttributes)
     });
     if (error) throw error;
   }
+}
+
+async function attachRemoteReviewTags(ratingId: string, companionIds: string[] = [], groupIds: string[] = []) {
+  if (!supabase) return false;
+  const companions = Array.from(new Set(companionIds.filter(isUuid)));
+  const groups = Array.from(new Set(groupIds.filter(isUuid)));
+  if (companions.length === 0 && groups.length === 0) return false;
+  const [companionResult, groupResult] = await Promise.all([
+    companions.length === 0
+      ? Promise.resolve({ error: null })
+      : supabase.from('review_companions').insert(companions.map((userId) => ({ rating_id: ratingId, user_id: userId }))),
+    groups.length === 0
+      ? Promise.resolve({ error: null })
+      : supabase.from('review_groups').insert(groups.map((groupId) => ({ rating_id: ratingId, group_id: groupId }))),
+  ]);
+  return Boolean(companionResult.error || groupResult.error);
+}
+
+export async function removeReviewCompanion(userId: string, ratingId: string): Promise<void> {
+  const activity = localState.feed.find((item) => item.id === ratingId);
+  if (activity?.companions) {
+    activity.companions = activity.companions.filter((profile) => profile.user_id !== userId);
+  }
+  if (!canUseUserScopedRemote(userId) || !isUuid(ratingId)) return;
+
+  const { error } = await supabase.from('review_companions').delete().eq('rating_id', ratingId).eq('user_id', userId);
+  if (error) throw new Error(error.message);
 }
 
 export async function toggleLike(userId: string, ratingId: string): Promise<void> {
@@ -1452,7 +1601,8 @@ export async function respondToSecretRequest(
 type EventQuery = {
   monthStart: Date;
   center: { latitude: number; longitude: number };
-  radiusMiles: number;
+  /** `null` means the distance filter is off for this view. */
+  radiusMiles: number | null;
   viewerId?: string;
   includePrivate?: boolean;
   force?: boolean;
@@ -1583,24 +1733,30 @@ async function fetchRemoteEvents(query: EventQuery): Promise<SpaceEvent[] | null
   if (!isSupabaseConfigured || !supabase) return null;
 
   const { start, end, startKey, endKey } = getMonthRange(query.monthStart);
-  const latitudeDelta = query.radiusMiles / MILES_PER_DEGREE_LATITUDE;
-  const longitudeDelta = query.radiusMiles /
-    (MILES_PER_DEGREE_LATITUDE * Math.max(0.1, Math.cos(query.center.latitude * (Math.PI / 180))));
   const weeklyFrom = toDateKey(new Date(start.getFullYear(), start.getMonth(), start.getDate() - WEEKLY_LIFETIME_DAYS));
   const weeklyTo = toDateKey(new Date(end.getFullYear(), end.getMonth(), end.getDate() + WEEKLY_LOOKBACK_DAYS + 1));
 
-  const { data, error } = await supabase
+  let request = supabase
     .from('space_events')
     .select('*, spaces!inner(*)')
-    .gte('spaces.latitude', query.center.latitude - latitudeDelta)
-    .lte('spaces.latitude', query.center.latitude + latitudeDelta)
-    .gte('spaces.longitude', query.center.longitude - longitudeDelta)
-    .lte('spaces.longitude', query.center.longitude + longitudeDelta)
     .or(
       `and(kind.eq.one_time,event_date.gte.${startKey},event_date.lte.${endKey}),` +
       `and(kind.eq.weekly,source_created_at.gte.${weeklyFrom},source_created_at.lte.${weeklyTo})`
     )
     .limit(500);
+
+  if (query.radiusMiles != null) {
+    const latitudeDelta = query.radiusMiles / MILES_PER_DEGREE_LATITUDE;
+    const longitudeDelta = query.radiusMiles /
+      (MILES_PER_DEGREE_LATITUDE * Math.max(0.1, Math.cos(query.center.latitude * (Math.PI / 180))));
+    request = request
+      .gte('spaces.latitude', query.center.latitude - latitudeDelta)
+      .lte('spaces.latitude', query.center.latitude + latitudeDelta)
+      .gte('spaces.longitude', query.center.longitude - longitudeDelta)
+      .lte('spaces.longitude', query.center.longitude + longitudeDelta);
+  }
+
+  const { data, error } = await request;
 
   if (error) {
     console.warn('Falling back to demo events after Supabase error:', error.message);
@@ -1631,7 +1787,7 @@ function buildOccurrences(events: SpaceEvent[], query: EventQuery): CalendarOccu
 
   events.forEach((event) => {
     const distance = calculateDistanceMiles(query.center, event.space);
-    if (distance > query.radiusMiles) return;
+    if (query.radiusMiles != null && distance > query.radiusMiles) return;
 
     expandEventDates(event, query.monthStart).forEach((date) => {
       const series = event.series_id || (event.source_type === 'hosted' ? event.id : seriesKey(event));
@@ -1659,7 +1815,7 @@ export async function listEventsNearby(query: EventQuery): Promise<CalendarOccur
     getMonthRange(query.monthStart).startKey,
     query.center.latitude.toFixed(3),
     query.center.longitude.toFixed(3),
-    query.radiusMiles,
+    query.radiusMiles ?? 'any',
     query.viewerId || 'anon',
     query.includePrivate ? 'private' : 'public',
   ].join('|');
@@ -2623,7 +2779,7 @@ const hereChatListeners = new Map<string, Set<MessageListener>>();
 export async function listHereMessages(event: SpaceEvent, date: string): Promise<EventMessage[]> {
   if (getEventPhase(event, date) !== 'live') return [];
   const seriesId = eventSeriesId(event);
-  if (isLocalEventId(seriesId) || !canUseUserScopedRemote(event.host_user_id || '')) {
+  if (isLocalEventId(seriesId)) {
     return localState.hereMessages
       .filter((message) => message.event_id === seriesId && message.occurrence_date === date)
       .sort((first, second) => first.created_at.localeCompare(second.created_at))
@@ -2899,36 +3055,44 @@ export async function listMyChats(userId: string): Promise<ChatThread[]> {
         last_message: latestMessage(localState.messages, eventSeriesId(event), date),
       }];
     }));
-    const hereThreads = events.flatMap((event) => {
-      const date = event.event_date;
-      if (!date) return [];
-      const here = localState.checkins.some((checkin) => checkin.event_id === eventSeriesId(event) && checkin.occurrence_date === date && checkin.user_id === userId);
-      const threaded = { ...event, occurrence_date: date, viewer_here: here };
-      if (!canUseHereChat(threaded, userId)) return [];
-      return [{
-        event: threaded,
-        occurrence_date: date,
-        kind: 'here' as const,
-        last_message: latestMessage(localState.hereMessages, eventSeriesId(event), date),
-      }];
-    });
+    const hereThreads = localState.checkins
+      .filter((checkin) => checkin.user_id === userId)
+      .flatMap((checkin) => {
+        const event = events.find((item) => eventSeriesId(item) === checkin.event_id)
+          || getLocalEvents().find((item) => eventSeriesId(item) === checkin.event_id);
+        if (!event || event.cancelled_at) return [];
+        const threaded = { ...event, occurrence_date: checkin.occurrence_date, viewer_here: true };
+        if (!canUseHereChat(threaded, userId)) return [];
+        return [{
+          event: threaded,
+          occurrence_date: checkin.occurrence_date,
+          kind: 'here' as const,
+          last_message: latestMessage(localState.hereMessages, eventSeriesId(event), checkin.occurrence_date),
+        }];
+      });
     return [...hereThreads, ...threads].sort((first, second) => (second.last_message?.created_at || second.occurrence_date).localeCompare(first.last_message?.created_at || first.occurrence_date));
   }
 
   const since = new Date();
   since.setDate(since.getDate() - 1);
   const sinceKey = toDateKey(since);
-  const [hostedResult, rsvpResult] = await Promise.all([
+  const [hostedResult, rsvpResult, checkinResult] = await Promise.all([
     supabase.from('space_events').select('*, spaces!inner(*)').eq('host_user_id', userId).is('cancelled_at', null),
     supabase.from('event_rsvps').select('event_id, occurrence_date').eq('user_id', userId).eq('status', 'going').gte('occurrence_date', sinceKey),
+    supabase.from('event_checkins').select('event_id, occurrence_date').eq('user_id', userId).gte('occurrence_date', sinceKey),
   ]);
   if (hostedResult.error) throw new Error(hostedResult.error.message);
   if (rsvpResult.error) throw new Error(rsvpResult.error.message);
 
   const hostedRows = (hostedResult.data || []) as Record<string, unknown>[];
   const rsvps = (rsvpResult.data || []) as { event_id: string; occurrence_date: string }[];
+  const checkins = checkinResult.error
+    ? []
+    : (checkinResult.data || []) as { event_id: string; occurrence_date: string }[];
   const known = new Set(hostedRows.map((row) => String(row.id)));
-  const missing = Array.from(new Set(rsvps.map((rsvp) => rsvp.event_id).filter((id) => !known.has(id))));
+  const missing = Array.from(new Set(
+    [...rsvps.map((rsvp) => rsvp.event_id), ...checkins.map((checkin) => checkin.event_id)].filter((id) => !known.has(id))
+  ));
   let extraRows: Record<string, unknown>[] = [];
   if (missing.length > 0) {
     const extra = await supabase.from('space_events').select('*, spaces!inner(*)').in('id', missing).is('cancelled_at', null);
@@ -2958,20 +3122,16 @@ export async function listMyChats(userId: string): Promise<ChatThread[]> {
     seen.add(key);
     return true;
   });
-  const checkinResult = await supabase.from('event_checkins').select('event_id, occurrence_date').eq('user_id', userId).gte('occurrence_date', sinceKey);
-  if (!checkinResult.error) {
-    const checkins = (checkinResult.data || []) as { event_id: string; occurrence_date: string }[];
-    checkins.forEach((checkin) => {
-      const event = events.find((item) => item.id === checkin.event_id || eventSeriesId(item) === checkin.event_id);
-      if (!event) return;
-      const threaded = { ...event, occurrence_date: checkin.occurrence_date, viewer_here: true };
-      if (!canUseHereChat(threaded, userId)) return;
-      const key = `here|${eventSeriesId(event)}|${checkin.occurrence_date}`;
-      if (seen.has(key)) return;
-      seen.add(key);
-      unique.push({ event: threaded, occurrence_date: checkin.occurrence_date, kind: 'here' });
-    });
-  }
+  checkins.forEach((checkin) => {
+    const event = events.find((item) => item.id === checkin.event_id || eventSeriesId(item) === checkin.event_id);
+    if (!event) return;
+    const threaded = { ...event, occurrence_date: checkin.occurrence_date, viewer_here: true };
+    if (!canUseHereChat(threaded, userId)) return;
+    const key = `here|${eventSeriesId(event)}|${checkin.occurrence_date}`;
+    if (seen.has(key)) return;
+    seen.add(key);
+    unique.push({ event: threaded, occurrence_date: checkin.occurrence_date, kind: 'here' });
+  });
 
   if (unique.length === 0) return [];
 
@@ -3121,11 +3281,37 @@ function seedDemoGroups() {
         created_at: timestamp,
         updated_at: timestamp,
       },
+      {
+        id: 'group-book-club',
+        name: 'Sunday book club',
+        description: 'One chapter, one cafe.',
+        visibility: 'public',
+        invite_token: 'demo-book-club-invite',
+        created_by: 'user-nina',
+        created_at: timestamp,
+        updated_at: timestamp,
+      },
+      {
+        id: 'group-dorm',
+        name: 'Dorm crew',
+        description: 'Just the people on our floor.',
+        visibility: 'private',
+        invite_token: 'demo-dorm-invite',
+        created_by: 'user-nina',
+        created_at: timestamp,
+        updated_at: timestamp,
+      },
     ];
     localState.groupMembers.push(
       { group_id: 'group-company', user_id: demoCurrentUserId, role: 'owner', created_at: timestamp },
       { group_id: 'group-company', user_id: 'user-mike', role: 'member', created_at: timestamp },
+      { group_id: 'group-company', user_id: 'user-nina', role: 'member', created_at: timestamp },
       { group_id: 'group-arlington', user_id: 'user-nina', role: 'owner', created_at: timestamp },
+      { group_id: 'group-arlington', user_id: 'user-emma', role: 'member', created_at: timestamp },
+      { group_id: 'group-book-club', user_id: 'user-nina', role: 'owner', created_at: timestamp },
+      { group_id: 'group-book-club', user_id: 'user-emma', role: 'member', created_at: timestamp },
+      { group_id: 'group-dorm', user_id: 'user-nina', role: 'owner', created_at: timestamp },
+      { group_id: 'group-dorm', user_id: 'user-emma', role: 'member', created_at: timestamp },
     );
     if (!localState.eventGroups.some((link) => link.event_id === DEMO_COFFEE_EVENT && link.group_id === 'group-company')) {
       localState.eventGroups.push({ event_id: DEMO_COFFEE_EVENT, group_id: 'group-company' });
@@ -3327,8 +3513,10 @@ export async function getGroupDetail(groupId: string, viewerId: string, token?: 
   if (!isUuid(groupId) || !canUseUserScopedRemote(viewerId)) {
     seedDemoGroups();
     const members = localMembers(groupId);
-    const memberIds = members.map((member) => member.user_id);
-    const feed = (await listRecentActivity({ currentUserId: viewerId, authorIds: memberIds })).slice(0, 40);
+    const feed = onlyGroupCompanions(
+      (await listRecentActivity({ currentUserId: viewerId, groupId })).slice(0, 40),
+      new Set(members.map((member) => member.user_id)),
+    );
     const linkedIds = new Set(localState.eventGroups.filter((link) => link.group_id === groupId).map((link) => link.event_id));
     const events = getLocalHosted(viewerId)
       .filter((event) => linkedIds.has(event.id) && !event.cancelled_at)
@@ -3371,10 +3559,10 @@ export async function getGroupDetail(groupId: string, viewerId: string, token?: 
     .map((event) => applyPresence(event, event.event_date, presence, viewerId))
     .sort((first, second) => (first.event_date || '').localeCompare(second.event_date || ''));
 
-  const feed = await listRecentActivity({
-    currentUserId: viewerId,
-    authorIds: members.map((member) => member.user_id),
-  });
+  const feed = onlyGroupCompanions(
+    await listRecentActivity({ currentUserId: viewerId, groupId }),
+    new Set(members.map((member) => member.user_id)),
+  );
 
   const { data: spotRows, error: spotError } = await supabase
     .from('group_spots')
@@ -3387,6 +3575,14 @@ export async function getGroupDetail(groupId: string, viewerId: string, token?: 
     .map((row) => mapSpaceRow(row));
   const spots = mergeSpots(saved, feed, events);
   return { group, members, events, spots, feed, content_visible: true };
+}
+
+function onlyGroupCompanions(feed: FeedActivity[], memberIds: Set<string>): FeedActivity[] {
+  return feed.map((activity) => {
+    if (!activity.companions?.length) return activity;
+    const companions = activity.companions.filter((profile) => memberIds.has(profile.user_id));
+    return companions.length === activity.companions.length ? activity : { ...activity, companions };
+  });
 }
 
 function localMembers(groupId: string): GroupMember[] {

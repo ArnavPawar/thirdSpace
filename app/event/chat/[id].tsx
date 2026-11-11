@@ -18,7 +18,7 @@ import { useAuth } from '@/lib/auth';
 import { canUseEventChat, canUseHereChat, getEvent, listEventMessages, listHereMessages, sendEventMessage, sendHereMessage, subscribeToEventMessages, subscribeToHereMessages } from '@/lib/data';
 import { formatEventWhen, getChatClosesAt, getEventPhase } from '@/lib/events';
 import { getDisplayName } from '@/lib/format';
-import { openEvent } from '@/lib/links';
+import { openEvent, openProfile } from '@/lib/links';
 import { colors } from '@/lib/theme';
 import { MAX_EVENT_MESSAGE_LENGTH, type EventMessage, type SpaceEvent } from '@/types/space';
 
@@ -165,14 +165,23 @@ export default function EventChatScreen() {
               <View className={`flex-row ${mine ? 'justify-end' : 'justify-start'} ${sameAuthorAsPrevious ? 'mt-1' : 'mt-3'}`}>
                 {!mine && (
                   <View className="w-8 mr-2 justify-end">
-                    {!sameAuthorAsPrevious && <Avatar name={name} size={28} />}
+                    {!sameAuthorAsPrevious && (
+                      <TouchableOpacity
+                        onPress={() => openProfile(item.user_id, userId)}
+                        accessibilityLabel={`View ${name}'s profile`}
+                      >
+                        <Avatar name={name} size={28} />
+                      </TouchableOpacity>
+                    )}
                   </View>
                 )}
                 <View className="max-w-[75%]">
                   {!mine && !sameAuthorAsPrevious && (
-                    <Text className="text-[12px] font-semibold text-slate-500 mb-1 ml-1">
-                      {item.user_id === event.host_user_id ? `${name} · Host` : name}
-                    </Text>
+                    <TouchableOpacity onPress={() => openProfile(item.user_id, userId)} accessibilityLabel={`View ${name}'s profile`}>
+                      <Text className="text-[12px] font-semibold text-slate-500 mb-1 ml-1">
+                        {item.user_id === event.host_user_id ? `${name} · Host` : name}
+                      </Text>
+                    </TouchableOpacity>
                   )}
                   <View
                     style={{ backgroundColor: mine ? colors.primary : colors.surface }}

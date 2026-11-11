@@ -303,7 +303,10 @@ export default function ProfileScreen() {
                 <View key={`${invite.kind}-${invite.kind === 'group' ? invite.group?.id : invite.event?.id}`} className="bg-white border border-slate-200 rounded-2xl px-4 py-3 mb-2">
                   <Text className="font-bold text-ink">{label}</Text>
                   <Text className="text-[13px] text-slate-500 mt-0.5">
-                    {from} invited you to this {invite.kind === 'group' ? 'group' : 'hangout'}.
+                    {invite.invited_by?.user_id ? (
+                      <Text className="font-semibold text-ink" onPress={() => openProfile(invite.invited_by!.user_id, userId)}>{from}</Text>
+                    ) : from}
+                    {' '}invited you to this {invite.kind === 'group' ? 'group' : 'hangout'}.
                   </Text>
                   <View className="flex-row gap-2 mt-3">
                     <TouchableOpacity onPress={() => handleInvite(invite, true)} className="flex-1 h-10 rounded-xl bg-primary items-center justify-center">
@@ -452,14 +455,20 @@ export default function ProfileScreen() {
                     return (
                       <View key={request.id} className="bg-white rounded-2xl border-2 border-secret/30 p-4 mb-2.5">
                         <View className="flex-row items-center">
-                          <Avatar name={requesterName} size={36} />
-                          <View className="flex-1 ml-3">
-                            <Text className="text-[15px] text-ink">
-                              <Text className="font-bold">{requesterName}</Text>
-                              {request.kind === 'trade' ? ' wants to trade' : ' wants in'}
-                            </Text>
-                            <Text className="text-xs text-slate-500">for {request.space_name || 'your secret spot'}</Text>
-                          </View>
+                          <TouchableOpacity
+                            onPress={() => openProfile(request.requester_id, userId)}
+                            accessibilityLabel={`View ${requesterName}'s profile`}
+                            className="flex-row items-center flex-1"
+                          >
+                            <Avatar name={requesterName} size={36} />
+                            <View className="flex-1 ml-3">
+                              <Text className="text-[15px] text-ink">
+                                <Text className="font-bold">{requesterName}</Text>
+                                {request.kind === 'trade' ? ' wants to trade' : ' wants in'}
+                              </Text>
+                              <Text className="text-xs text-slate-500">for {request.space_name || 'your secret spot'}</Text>
+                            </View>
+                          </TouchableOpacity>
                           {request.kind === 'trade' && <ArrowLeftRight size={18} color={colors.secret} />}
                         </View>
                         {request.message && (
@@ -524,7 +533,11 @@ export default function ProfileScreen() {
                     space={spot.space}
                     compact
                     onPress={() => router.push(`/space/${spot.id}` as never)}
-                    accessory={<Text className="text-xs text-slate-400">from {getDisplayName(spot.owner).split(' ')[0]}</Text>}
+                    accessory={(
+                      <TouchableOpacity onPress={() => openProfile(spot.owner.user_id, userId)} accessibilityLabel={`View ${getDisplayName(spot.owner)}'s profile`}>
+                        <Text className="text-xs font-semibold text-ink">from {getDisplayName(spot.owner).split(' ')[0]}</Text>
+                      </TouchableOpacity>
+                    )}
                   />
                 </View>
               ))}

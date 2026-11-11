@@ -15,7 +15,7 @@ import { Stack, useLocalSearchParams } from 'expo-router';
 import { Send } from 'lucide-react-native';
 import { Avatar } from '@/components/ui';
 import { useAuth } from '@/lib/auth';
-import { getProfile, listDirectMessages, sendDirectMessage } from '@/lib/data';
+import { getPublicProfile, listDirectMessages, sendDirectMessage } from '@/lib/data';
 import { getDisplayName } from '@/lib/format';
 import { openProfile } from '@/lib/links';
 import { colors } from '@/lib/theme';
@@ -41,10 +41,11 @@ export default function DirectMessageScreen() {
   const load = useCallback(async () => {
     try {
       const [profile, thread] = await Promise.all([
-        getProfile(otherUserId).catch(() => null),
+        getPublicProfile(otherUserId, userId),
         listDirectMessages(userId, otherUserId),
       ]);
-      setPerson(profile);
+      const fromThread = thread.find((message) => message.sender_id === otherUserId)?.profile;
+      setPerson(profile || fromThread || null);
       setMessages(thread);
     } catch (error) {
       Alert.alert('Message', error instanceof Error ? error.message : 'Could not load this conversation.');
