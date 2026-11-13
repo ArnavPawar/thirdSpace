@@ -25,10 +25,10 @@ export default function AttributeBars({
       {items.map((item) => (
         <View key={item.key} style={{ width: columns === 2 ? '50%' : '100%' }} className="px-2 mb-2.5">
           <View className="flex-row justify-between mb-1">
-            <Text className="text-xs text-slate-500 flex-1" numberOfLines={1}>{item.label}</Text>
-            <Text className="text-xs font-bold text-slate-700 ml-2">{Number(item.value.toFixed(1))}</Text>
+            <Text className="text-xs text-muted flex-1" numberOfLines={1}>{item.label}</Text>
+            <Text className="text-xs font-bold text-body ml-2">{Number(item.value.toFixed(1))}</Text>
           </View>
-          <View className="h-1.5 rounded-full bg-slate-100 overflow-hidden">
+          <View className="h-1.5 rounded-full bg-fill overflow-hidden">
             <View style={{ width: `${(item.value / 5) * 100}%`, backgroundColor: color }} className="h-1.5 rounded-full" />
           </View>
         </View>

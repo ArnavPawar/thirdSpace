@@ -6,16 +6,18 @@ import * as AppleAuthentication from 'expo-apple-authentication';
 import { PrimaryButton } from '@/components/ui';
 import { completePasswordResetFromLink, isAppleSignInAvailable, useAuth, type OAuthProvider } from '@/lib/auth';
 import { isSupabaseConfigured } from '@/lib/supabase';
-import { colors } from '@/lib/theme';
+import { useColors, useColorSchemeName } from '@/lib/theme';
 
 type PendingAction = 'sign-in' | 'sign-up' | 'reset' | 'paste' | 'apple' | OAuthProvider | null;
 
 const PROVIDER_BUTTONS: { provider: OAuthProvider; label: string; mark: string; markColor: string; background: string; textColor: string; border?: string }[] = [
-  { provider: 'google', label: 'Continue with Google', mark: 'G', markColor: '#4285F4', background: '#ffffff', textColor: colors.ink, border: '#e2e8f0' },
+  { provider: 'google', label: 'Continue with Google', mark: 'G', markColor: '#4285F4', background: '#ffffff', textColor: '#1f1f1f', border: '#dadce0' },
   { provider: 'facebook', label: 'Continue with Facebook', mark: 'f', markColor: '#ffffff', background: '#1877F2', textColor: '#ffffff' },
 ];
 
 export default function AuthScreen() {
+  const colors = useColors();
+  const scheme = useColorSchemeName();
   const { next } = useLocalSearchParams<{ next?: string | string[] }>();
   const { signIn, signUp, requestPasswordReset, resendConfirmation, signInWithApple, signInWithProvider } = useAuth();
   const [email, setEmail] = useState('');
@@ -143,30 +145,34 @@ export default function AuthScreen() {
   };
 
   return (
-    <SafeAreaView edges={['bottom']} className="flex-1 bg-slate-50">
+    <SafeAreaView edges={['bottom']} className="flex-1 bg-canvas">
       <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} className="flex-1">
         <ScrollView contentContainerStyle={{ flexGrow: 1, justifyContent: 'center', padding: 20 }} keyboardShouldPersistTaps="handled">
-          <Text className="text-[32px] font-extrabold text-ink tracking-tight">Find your third space</Text>
-          <Text className="text-[15px] text-slate-500 mt-2 mb-8 leading-5">
+          <Text className="text-[26px] font-bold text-ink tracking-tight">Third Space</Text>
+          <Text className="text-[15px] text-muted mt-1.5 mb-8 leading-[22px]">
             Sign in to save your rankings, keep secret spots, and earn vibe perks.
           </Text>
 
           {!isSupabaseConfigured && (
-            <View className="bg-amber-50 border border-amber-200 rounded-2xl p-3 mb-5">
-              <Text className="text-amber-800 text-[13px]">
+            <View className="bg-warning-soft rounded-xl px-4 py-3 mb-5">
+              <Text className="text-warning text-[13px] leading-[18px]">
                 Supabase isn't configured yet, so the app is running on demo data.
               </Text>
             </View>
           )}
 
-          <View className="gap-3">
+          <View className="gap-2.5">
             {appleAvailable && (
               <View pointerEvents={pending ? 'none' : 'auto'} style={{ opacity: pending && pending !== 'apple' ? 0.5 : 1 }}>
                 <AppleAuthentication.AppleAuthenticationButton
                   buttonType={AppleAuthentication.AppleAuthenticationButtonType.CONTINUE}
-                  buttonStyle={AppleAuthentication.AppleAuthenticationButtonStyle.BLACK}
-                  cornerRadius={16}
-                  style={{ height: 52, width: '100%' }}
+                  buttonStyle={
+                    scheme === 'dark'
+                      ? AppleAuthentication.AppleAuthenticationButtonStyle.WHITE
+                      : AppleAuthentication.AppleAuthenticationButtonStyle.BLACK
+                  }
+                  cornerRadius={12}
+                  style={{ height: 50, width: '100%' }}
                   onPress={() => runSocial('apple')}
                 />
               </View>
@@ -183,14 +189,14 @@ export default function AuthScreen() {
                   borderColor: button.border || button.background,
                   opacity: pending && pending !== button.provider ? 0.5 : 1,
                 }}
-                className="h-[52px] rounded-2xl border flex-row items-center justify-center"
+                className="h-[50px] rounded-xl border flex-row items-center justify-center"
               >
                 {pending === button.provider ? (
                   <ActivityIndicator color={button.textColor} />
                 ) : (
                   <>
-                    <Text style={{ color: button.markColor }} className="text-xl font-extrabold mr-2.5">{button.mark}</Text>
-                    <Text style={{ color: button.textColor }} className="font-semibold text-base">{button.label}</Text>
+                    <Text style={{ color: button.markColor }} className="text-[20px] font-bold mr-2.5">{button.mark}</Text>
+                    <Text style={{ color: button.textColor }} className="font-semibold text-[16px]">{button.label}</Text>
                   </>
                 )}
               </TouchableOpacity>
@@ -198,47 +204,53 @@ export default function AuthScreen() {
           </View>
 
           <View className="flex-row items-center my-6">
-            <View className="flex-1 h-px bg-slate-200" />
-            <Text className="mx-3 text-xs font-semibold text-slate-400">OR USE EMAIL</Text>
-            <View className="flex-1 h-px bg-slate-200" />
+            <View className="flex-1 h-px bg-line" />
+            <Text className="mx-3 text-[13px] text-muted">or use email</Text>
+            <View className="flex-1 h-px bg-line" />
           </View>
 
-          <TextInput
-            value={email}
-            onChangeText={setEmail}
-            placeholder="Email"
-            placeholderTextColor={colors.subtle}
-            autoCapitalize="none"
-            autoComplete="email"
-            keyboardType="email-address"
-            className="bg-white border border-slate-200 rounded-2xl px-4 h-[52px] mb-3 text-base text-ink"
-          />
-          <TextInput
-            value={password}
-            onChangeText={setPassword}
-            placeholder="Password (6+ characters)"
-            placeholderTextColor={colors.subtle}
-            secureTextEntry
-            autoComplete="password"
-            className="bg-white border border-slate-200 rounded-2xl px-4 h-[52px] mb-2 text-base text-ink"
-          />
+          <View className="bg-surface rounded-xl overflow-hidden">
+            <TextInput
+              value={email}
+              onChangeText={setEmail}
+              placeholder="Email"
+              placeholderTextColor={colors.subtle}
+              keyboardAppearance={scheme}
+              autoCapitalize="none"
+              autoComplete="email"
+              keyboardType="email-address"
+              className="h-12 px-4 text-[16px] text-ink"
+            />
+            <View className="h-px bg-line-soft ml-4" />
+            <TextInput
+              value={password}
+              onChangeText={setPassword}
+              placeholder="Password (6+ characters)"
+              placeholderTextColor={colors.subtle}
+              keyboardAppearance={scheme}
+              secureTextEntry
+              autoComplete="password"
+              className="h-12 px-4 text-[16px] text-ink"
+            />
+          </View>
           <TouchableOpacity
             onPress={handleForgotPassword}
             disabled={pending !== null}
             accessibilityRole="button"
-            className="self-end mb-5 py-2"
+            hitSlop={8}
+            className="self-end mt-1 mb-4 py-2"
           >
             {pending === 'reset' ? (
-              <ActivityIndicator color={colors.primary} />
+              <ActivityIndicator color={colors.muted} />
             ) : (
-              <Text className="text-primary font-semibold text-sm">Forgot password?</Text>
+              <Text className="text-primary font-medium text-[14px]">Forgot password?</Text>
             )}
           </TouchableOpacity>
 
           {resetSentTo && (
-            <View className="bg-white border border-slate-200 rounded-2xl p-4 mb-5">
-              <Text className="text-[15px] font-bold text-ink">Paste the reset link</Text>
-              <Text className="text-[13px] text-slate-500 mt-1 mb-3 leading-5">
+            <View className="bg-surface rounded-2xl p-4 mb-5">
+              <Text className="text-[16px] font-semibold text-ink">Paste the reset link</Text>
+              <Text className="text-[13px] text-muted mt-1 mb-3 leading-[18px]">
                 Copy the link from the email to {resetSentTo}. Leave the link untapped. Opening it uses it up, and Mail cannot hand it to the app.
               </Text>
               <TextInput
@@ -246,10 +258,12 @@ export default function AuthScreen() {
                 onChangeText={setResetLink}
                 placeholder="Paste the reset link"
                 placeholderTextColor={colors.subtle}
+                keyboardAppearance={scheme}
                 autoCapitalize="none"
                 autoCorrect={false}
                 multiline
-                className="bg-slate-50 border border-slate-200 rounded-xl px-3 py-3 mb-3 text-[13px] text-ink min-h-[72px]"
+                textAlignVertical="top"
+                className="bg-fill rounded-xl px-4 py-3 mb-3 text-[14px] text-ink min-h-[72px]"
               />
               <PrimaryButton
                 label="Continue"

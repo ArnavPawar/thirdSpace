@@ -1,17 +1,18 @@
 import React, { useCallback, useState } from 'react';
-import { ActivityIndicator, Alert, FlatList, RefreshControl, Text, TouchableOpacity, View } from 'react-native';
+import { ActivityIndicator, Alert, FlatList, RefreshControl, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router, useFocusEffect, useLocalSearchParams } from 'expo-router';
 import { MapPin, MessageCircle, UserCheck, UserPlus, UserX } from 'lucide-react-native';
 import FeedCard from '@/components/FeedCard';
-import { Avatar, EmptyState, VibeTitleChip } from '@/components/ui';
+import { Avatar, EmptyState, PrimaryButton, VibeTitleChip } from '@/components/ui';
 import { useAuth } from '@/lib/auth';
 import { getPublicProfile, listRecentActivity, toggleFollow } from '@/lib/data';
 import { getDisplayName } from '@/lib/format';
-import { colors } from '@/lib/theme';
+import { useColors } from '@/lib/theme';
 import type { FeedActivity, ProfileWithStats } from '@/types/space';
 
 export default function UserProfileScreen() {
+  const colors = useColors();
   const { id } = useLocalSearchParams<{ id: string }>();
   const { userId } = useAuth();
   const [profile, setProfile] = useState<ProfileWithStats | null>(null);
@@ -61,7 +62,7 @@ export default function UserProfileScreen() {
 
   if (isLoading) {
     return (
-      <View className="flex-1 bg-slate-50 items-center justify-center">
+      <View className="flex-1 bg-canvas items-center justify-center">
         <ActivityIndicator color={colors.primary} />
       </View>
     );
@@ -69,7 +70,7 @@ export default function UserProfileScreen() {
 
   if (!profile) {
     return (
-      <SafeAreaView edges={['bottom']} className="flex-1 bg-slate-50 justify-center px-5">
+      <SafeAreaView edges={['bottom']} className="flex-1 bg-canvas justify-center px-5">
         <EmptyState
           icon={UserX}
           title="Profile unavailable"
@@ -85,7 +86,7 @@ export default function UserProfileScreen() {
   const firstName = name.split(' ')[0];
 
   return (
-    <SafeAreaView edges={['bottom']} className="flex-1 bg-slate-50">
+    <SafeAreaView edges={['bottom']} className="flex-1 bg-canvas">
       <FlatList
         data={reviews}
         keyExtractor={(item) => item.id}
@@ -93,59 +94,56 @@ export default function UserProfileScreen() {
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => { setRefreshing(true); load(); }} tintColor={colors.primary} />}
         ItemSeparatorComponent={() => <View className="h-3" />}
         ListHeaderComponent={
-          <View className="mb-6">
-            <View className="bg-white rounded-3xl border border-slate-200 p-5">
-              <View className="flex-row items-center">
-                <Avatar name={name} size={72} />
-                <View className="flex-1 ml-4">
-                  <Text className="text-xl font-extrabold text-ink">{name}</Text>
-                  {profile.username && <Text className="text-slate-500">@{profile.username}</Text>}
-                  {profile.location && (
-                    <View className="flex-row items-center mt-1">
-                      <MapPin size={12} color={colors.subtle} />
-                      <Text className="text-[13px] text-slate-400 ml-1">{profile.location}</Text>
-                    </View>
-                  )}
+          <View className="mb-3">
+            <View className="items-center pt-2 px-1">
+              <Avatar name={name} uri={profile.avatar_url} size={88} />
+              <Text className="text-[24px] font-bold text-ink tracking-tight mt-3 text-center">{name}</Text>
+              {profile.username && <Text className="text-[15px] text-muted mt-0.5">@{profile.username}</Text>}
+              {profile.location && (
+                <View className="flex-row items-center mt-1.5">
+                  <MapPin size={13} color={colors.muted} />
+                  <Text className="text-[13px] text-muted ml-1">{profile.location}</Text>
                 </View>
-              </View>
+              )}
 
               {profile.vibe_title && (
-                <View className="mt-4">
+                <View className="mt-3">
                   <VibeTitleChip title={profile.vibe_title} size="md" />
                 </View>
               )}
 
-              {profile.bio && <Text className="text-[15px] text-slate-700 leading-[21px] mt-3">{profile.bio}</Text>}
-
-              <TouchableOpacity
-                onPress={handleToggleFollow}
-                activeOpacity={0.8}
-                className={`mt-4 h-11 rounded-2xl flex-row items-center justify-center ${profile.is_following ? 'bg-slate-100' : 'bg-primary'}`}
-              >
-                {profile.is_following ? <UserCheck size={16} color={colors.muted} /> : <UserPlus size={16} color="white" />}
-                <Text className={`font-bold ml-2 ${profile.is_following ? 'text-slate-600' : 'text-white'}`}>
-                  {profile.is_following ? 'Following' : 'Follow'}
-                </Text>
-              </TouchableOpacity>
-
-              <View className="flex-row mt-5 pt-4 border-t border-slate-100">
-                {[
-                  { label: 'Spots', value: profile.stats.spaces_rated },
-                  { label: 'Reviews', value: profile.stats.reviews_written },
-                  { label: 'Followers', value: profile.stats.followers },
-                  { label: 'Following', value: profile.stats.following },
-                ].map((stat) => (
-                  <View key={stat.label} className="flex-1 items-center">
-                    <Text className="text-xl font-extrabold text-ink">{stat.value}</Text>
-                    <Text className="text-xs text-slate-500 mt-0.5">{stat.label}</Text>
-                  </View>
-                ))}
-              </View>
+              {profile.bio && (
+                <Text className="text-[15px] text-body leading-[22px] mt-3 text-center max-w-[340px]">{profile.bio}</Text>
+              )}
             </View>
 
-            <View className="flex-row items-center mt-6">
-              <Text className="text-[17px] font-bold text-ink flex-1">Reviews</Text>
-              <Text className="text-sm text-slate-400">{reviews.length}</Text>
+            <View className="flex-row mt-5">
+              {[
+                { label: 'Spots', value: profile.stats.spaces_rated },
+                { label: 'Reviews', value: profile.stats.reviews_written },
+                { label: 'Followers', value: profile.stats.followers },
+                { label: 'Following', value: profile.stats.following },
+              ].map((stat) => (
+                <View key={stat.label} className="flex-1 items-center">
+                  <Text className="text-[17px] font-semibold text-ink">{stat.value}</Text>
+                  <Text className="text-[13px] text-muted mt-0.5">{stat.label}</Text>
+                </View>
+              ))}
+            </View>
+
+            <View className="mt-5">
+              <PrimaryButton
+                label={profile.is_following ? 'Following' : 'Follow'}
+                icon={profile.is_following ? UserCheck : UserPlus}
+                tone={profile.is_following ? 'neutral' : 'primary'}
+                size="md"
+                onPress={handleToggleFollow}
+              />
+            </View>
+
+            <View className="flex-row items-baseline mt-8">
+              <Text className="text-[18px] font-semibold text-ink flex-1">Reviews</Text>
+              <Text className="text-[15px] text-muted">{reviews.length}</Text>
             </View>
           </View>
         }

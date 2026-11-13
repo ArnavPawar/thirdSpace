@@ -3,7 +3,7 @@ import { Alert, Platform, ScrollView, TouchableOpacity, View } from 'react-nativ
 import { Image } from 'expo-image';
 import * as ImagePicker from 'expo-image-picker';
 import { ImagePlus, X } from 'lucide-react-native';
-import { colors } from '@/lib/theme';
+import { useColors } from '@/lib/theme';
 import { MAX_PHOTOS_PER_POST, type LocalPhoto } from '@/types/space';
 
 const toLocalPhotos = (result: ImagePicker.ImagePickerResult): LocalPhoto[] =>
@@ -26,6 +26,22 @@ async function takePhoto(): Promise<LocalPhoto[]> {
     return [];
   }
   return toLocalPhotos(await ImagePicker.launchCameraAsync({ mediaTypes: ['images'], quality: 1 }));
+}
+
+/** One photo cropped to a square, for profile pictures. */
+export async function pickSquarePhoto(source: 'library' | 'camera'): Promise<LocalPhoto | null> {
+  const options: ImagePicker.ImagePickerOptions = { mediaTypes: ['images'], allowsEditing: true, aspect: [1, 1], quality: 1 };
+  if (source === 'camera') {
+    const permission = await ImagePicker.requestCameraPermissionsAsync();
+    if (!permission.granted) {
+      Alert.alert('Camera access needed', 'Allow camera access in Settings to take a photo.');
+      return null;
+    }
+  }
+  const result = source === 'camera'
+    ? await ImagePicker.launchCameraAsync(options)
+    : await ImagePicker.launchImageLibraryAsync(options);
+  return toLocalPhotos(result)[0] ?? null;
 }
 
 /** Asks for up to `limit` photos from the camera or library. Web only has the library. */
@@ -56,7 +72,7 @@ export function PhotoThumbnails({ photos, onRemove, size = 72, disabled }: Photo
   return (
     <>
       {photos.map((photo, index) => (
-        <View key={photo.uri} style={{ width: size, height: size }} className="rounded-xl overflow-hidden bg-slate-100">
+        <View key={photo.uri} style={{ width: size, height: size }} className="rounded-xl overflow-hidden bg-fill">
           <Image source={{ uri: photo.uri }} style={{ width: size, height: size }} contentFit="cover" />
           {!disabled && (
             <TouchableOpacity
@@ -82,6 +98,7 @@ interface PhotoPickerRowProps {
 }
 
 export default function PhotoPickerRow({ photos, onChange, max = MAX_PHOTOS_PER_POST, disabled }: PhotoPickerRowProps) {
+  const colors = useColors();
   const remaining = max - photos.length;
 
   const handleAdd = async () => {
@@ -101,7 +118,7 @@ export default function PhotoPickerRow({ photos, onChange, max = MAX_PHOTOS_PER_
           onPress={handleAdd}
           accessibilityLabel="Add photos"
           activeOpacity={0.7}
-          className="w-[72px] h-[72px] rounded-xl border-2 border-dashed border-slate-300 bg-white items-center justify-center"
+          className="w-[72px] h-[72px] rounded-xl border border-dashed border-fill-strong bg-fill items-center justify-center"
         >
           <ImagePlus size={22} color={colors.muted} />
         </TouchableOpacity>

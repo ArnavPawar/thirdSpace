@@ -1,5 +1,6 @@
 import React from 'react';
 import { Text, TouchableOpacity, View } from 'react-native';
+import { useColors } from '@/lib/theme';
 import type { EventTheme, EventVisibility } from '@/types/space';
 
 export interface EventThemeStyle {
@@ -26,6 +27,14 @@ export function eventThemeStyle(theme?: string): EventThemeStyle {
   return (theme && theme in THEME_BY_ID ? THEME_BY_ID[theme as EventTheme] : undefined) || THEME_BY_ID.indigo;
 }
 
+function PosterBadge({ label, color, background }: { label: string; color: string; background: string }) {
+  return (
+    <View style={{ backgroundColor: background }} className="rounded-full px-2.5 py-1 mr-2">
+      <Text style={{ color }} className="text-[12px] font-semibold">{label}</Text>
+    </View>
+  );
+}
+
 export function EventPoster({
   title,
   when,
@@ -45,34 +54,25 @@ export function EventPoster({
 }) {
   const style = eventThemeStyle(theme);
   return (
-    <View style={{ backgroundColor: style.background }} className="rounded-3xl overflow-hidden px-5 pt-5 pb-6 min-h-[210px]">
+    <View style={{ backgroundColor: style.background }} className="rounded-2xl overflow-hidden px-5 pt-5 pb-6 min-h-[200px]">
       <View
-        style={{ backgroundColor: style.glow, position: 'absolute', width: 180, height: 180, borderRadius: 90, top: -70, right: -40, opacity: ended ? 0.35 : 0.9 }}
-      />
-      <View
-        style={{ backgroundColor: style.ink, position: 'absolute', width: 120, height: 120, borderRadius: 60, bottom: -50, left: -20, opacity: 0.08 }}
+        style={{ backgroundColor: style.glow, position: 'absolute', width: 180, height: 180, borderRadius: 90, top: -80, right: -50, opacity: ended ? 0.3 : 0.75 }}
       />
       <View className="flex-row items-center">
         {visibility && (
-          <View style={{ backgroundColor: 'rgba(255,255,255,0.16)' }} className="rounded-full px-2.5 py-1">
-            <Text style={{ color: style.ink }} className="text-[11px] font-bold uppercase">
-              {visibility === 'private' ? 'Private' : 'Public'}
-            </Text>
-          </View>
+          <PosterBadge
+            label={visibility === 'private' ? 'Private' : 'Public'}
+            color={style.ink}
+            background="rgba(255,255,255,0.16)"
+          />
         )}
-        {cancelled && (
-          <Text className="text-[12px] font-bold text-rose-200 ml-2">Cancelled</Text>
-        )}
-        {ended && !cancelled && (
-          <View style={{ backgroundColor: 'rgba(0,0,0,0.35)' }} className="rounded-full px-2.5 py-1 ml-2">
-            <Text style={{ color: style.ink }} className="text-[11px] font-bold uppercase">Ended</Text>
-          </View>
-        )}
+        {cancelled && <PosterBadge label="Cancelled" color="#fecdd3" background="rgba(0,0,0,0.35)" />}
+        {ended && !cancelled && <PosterBadge label="Ended" color={style.ink} background="rgba(0,0,0,0.35)" />}
       </View>
-      <Text style={{ color: style.ink }} className="text-[32px] font-extrabold mt-8 leading-9" numberOfLines={3}>
+      <Text style={{ color: style.ink }} className="text-[30px] font-bold tracking-tight mt-8 leading-9" numberOfLines={3}>
         {title.trim() || 'Name the hangout'}
       </Text>
-      <Text style={{ color: style.muted }} className="text-[15px] font-semibold mt-3">{when}</Text>
+      <Text style={{ color: style.muted }} className="text-[15px] font-medium mt-3">{when}</Text>
       {place ? (
         <Text style={{ color: style.ink }} className="text-[15px] mt-1" numberOfLines={1}>{place}</Text>
       ) : null}
@@ -81,6 +81,7 @@ export function EventPoster({
 }
 
 export function ThemePicker({ value, onChange }: { value?: string; onChange: (theme: EventTheme) => void }) {
+  const colors = useColors();
   return (
     <View className="flex-row flex-wrap gap-2">
       {EVENT_THEMES.map((theme) => {
@@ -91,13 +92,13 @@ export function ThemePicker({ value, onChange }: { value?: string; onChange: (th
             onPress={() => onChange(theme.id)}
             accessibilityLabel={`${theme.label} theme`}
             accessibilityState={{ selected }}
-            style={{
-              backgroundColor: theme.background,
-              borderColor: selected ? '#0f172a' : 'transparent',
-            }}
+            activeOpacity={0.7}
+            style={{ borderColor: selected ? colors.ink : 'transparent' }}
             className="w-11 h-11 rounded-full border-2 items-center justify-center"
           >
-            <View style={{ backgroundColor: theme.glow }} className="w-4 h-4 rounded-full" />
+            <View style={{ backgroundColor: theme.background }} className="w-9 h-9 rounded-full items-center justify-center">
+              <View style={{ backgroundColor: theme.glow }} className="w-3.5 h-3.5 rounded-full" />
+            </View>
           </TouchableOpacity>
         );
       })}

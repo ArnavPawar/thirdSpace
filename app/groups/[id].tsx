@@ -1,13 +1,13 @@
 import React, { useCallback, useState } from 'react';
-import { ActivityIndicator, Alert, Modal, ScrollView, Text, TouchableOpacity, View } from 'react-native';
+import { ActivityIndicator, Alert, ScrollView, Text, TouchableOpacity, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import MapView, { Marker } from 'react-native-maps';
 import { router, useFocusEffect, useLocalSearchParams } from 'expo-router';
-import { CalendarDays, Lock, MapPin, Plus, Users } from 'lucide-react-native';
+import { CalendarDays, ChevronRight, Globe, Lock, MapPin, Plus, UserPlus, UsersRound } from 'lucide-react-native';
 import EventCard from '@/components/EventCard';
 import FeedCard from '@/components/FeedCard';
 import InviteSheet from '@/components/InviteSheet';
-import { Avatar, EmptyState, PrimaryButton, SegmentedControl } from '@/components/ui';
+import { Avatar, CategoryIcon, EmptyState, PersonRow, PrimaryButton, SegmentedControl, Sheet } from '@/components/ui';
 import { useAuth } from '@/lib/auth';
 import {
   getGroupDetail,
@@ -23,7 +23,7 @@ import {
 } from '@/lib/data';
 import { getDisplayName } from '@/lib/format';
 import { copyInviteLink, groupShareUrl, openProfile, requireSignedIn, shareGroup } from '@/lib/links';
-import { colors } from '@/lib/theme';
+import { useColors, useColorSchemeName } from '@/lib/theme';
 import type { CalendarOccurrence, GroupDetail, InviteStatus, Profile, SpaceWithAttributes } from '@/types/space';
 
 const firstParam = (value?: string | string[]) => (Array.isArray(value) ? value[0] : value);
@@ -41,6 +41,8 @@ function occurrenceFor(detail: GroupDetail, index: number): CalendarOccurrence {
 }
 
 export default function GroupDetailScreen() {
+  const colors = useColors();
+  const scheme = useColorSchemeName();
   const params = useLocalSearchParams<{ id: string; token?: string | string[] }>();
   const groupId = firstParam(params.id) || '';
   const token = firstParam(params.token);
@@ -155,7 +157,7 @@ export default function GroupDetailScreen() {
 
   if (isLoading) {
     return (
-      <SafeAreaView edges={['bottom']} className="flex-1 bg-slate-50 items-center justify-center">
+      <SafeAreaView edges={['bottom']} className="flex-1 bg-canvas items-center justify-center">
         <ActivityIndicator color={colors.primary} />
       </SafeAreaView>
     );
@@ -163,7 +165,7 @@ export default function GroupDetailScreen() {
 
   if (!detail) {
     return (
-      <SafeAreaView edges={['bottom']} className="flex-1 bg-slate-50 px-5 justify-center">
+      <SafeAreaView edges={['bottom']} className="flex-1 bg-canvas px-5 justify-center">
         <EmptyState icon={Lock} title="This group is private" body="You need an invite link or an invite from a member." />
       </SafeAreaView>
     );
@@ -174,48 +176,70 @@ export default function GroupDetailScreen() {
   const shareUrl = groupShareUrl(shareTarget);
   const canInvite = Boolean(group.viewer_role);
 
-  return (
-    <SafeAreaView edges={['bottom']} className="flex-1 bg-slate-50">
-      <ScrollView contentContainerStyle={{ padding: 20, paddingBottom: 40 }}>
-        <View className="flex-row items-center">
-          <View className={`rounded-full px-2.5 py-1 ${group.visibility === 'private' ? 'bg-slate-200' : 'bg-primary/10'}`}>
-            <Text className={`text-[12px] font-bold ${group.visibility === 'private' ? 'text-slate-600' : 'text-primary'}`}>
-              {group.visibility === 'private' ? 'Private' : 'Public'}
-            </Text>
-          </View>
-          <Text className="text-[13px] text-slate-500 ml-2">{group.member_count} {group.member_count === 1 ? 'member' : 'members'}</Text>
-        </View>
-        <Text className="text-[32px] font-extrabold text-ink tracking-tight mt-2">{group.name}</Text>
-        {group.description ? <Text className="text-[15px] text-slate-600 mt-2 leading-5">{group.description}</Text> : null}
+  const VisibilityIcon = group.visibility === 'private' ? Lock : Globe;
+  const stats = [
+    { label: group.member_count === 1 ? 'Member' : 'Members', value: group.member_count },
+    ...(detail.content_visible
+      ? [
+        { label: detail.spots.length === 1 ? 'Spot' : 'Spots', value: detail.spots.length },
+        { label: detail.events.length === 1 ? 'Hangout' : 'Hangouts', value: detail.events.length },
+        { label: detail.feed.length === 1 ? 'Post' : 'Posts', value: detail.feed.length },
+      ]
+      : []),
+  ];
 
-        <View className="flex-row gap-2 mt-4">
+  return (
+    <SafeAreaView edges={['bottom']} className="flex-1 bg-canvas">
+      <ScrollView contentContainerStyle={{ padding: 16, paddingTop: 4, paddingBottom: 40 }}>
+        <View className="items-center pt-2 px-1">
+          <Avatar name={group.name} size={88} />
+          <Text className="text-[24px] font-bold text-ink tracking-tight mt-3 text-center">{group.name}</Text>
+          <View className="flex-row items-center mt-1">
+            <VisibilityIcon size={13} color={colors.muted} />
+            <Text className="text-[15px] text-muted ml-1">{group.visibility === 'private' ? 'Private group' : 'Public group'}</Text>
+          </View>
+          {group.description ? (
+            <Text className="text-[15px] text-body mt-3 leading-[22px] text-center max-w-[340px]">{group.description}</Text>
+          ) : null}
+        </View>
+
+        <View className="flex-row mt-5">
+          {stats.map((stat) => (
+            <View key={stat.label} className="flex-1 items-center">
+              <Text className="text-[17px] font-semibold text-ink">{stat.value}</Text>
+              <Text className="text-[13px] text-muted mt-0.5">{stat.label}</Text>
+            </View>
+          ))}
+        </View>
+
+        <View className="flex-row gap-2 mt-5">
           {group.viewer_role ? (
-            <TouchableOpacity onPress={confirmLeave} disabled={isSaving} className="flex-1 h-12 rounded-2xl bg-white border border-slate-200 items-center justify-center">
-              <Text className="font-semibold text-ink">Leave</Text>
-            </TouchableOpacity>
+            <View className="flex-1">
+              <PrimaryButton label="Leave" tone="neutral" size="md" disabled={isSaving} onPress={confirmLeave} />
+            </View>
           ) : group.invite_status === 'pending' ? (
             <>
               <View className="flex-1">
-                <PrimaryButton label="Accept" loading={isSaving} onPress={() => run(() => respondToGroupInvite(userId, group.id, 'accepted'))} />
+                <PrimaryButton label="Accept" size="md" loading={isSaving} onPress={() => run(() => respondToGroupInvite(userId, group.id, 'accepted'))} />
               </View>
-              <TouchableOpacity onPress={() => run(() => respondToGroupInvite(userId, group.id, 'declined'))} className="flex-1 h-12 rounded-2xl bg-white border border-slate-200 items-center justify-center">
-                <Text className="font-semibold text-ink">Decline</Text>
-              </TouchableOpacity>
+              <View className="flex-1">
+                <PrimaryButton label="Decline" tone="neutral" size="md" onPress={() => run(() => respondToGroupInvite(userId, group.id, 'declined'))} />
+              </View>
             </>
           ) : group.visibility === 'public' || token ? (
             <View className="flex-1">
-              <PrimaryButton label="Join" loading={isSaving} onPress={() => run(() => joinGroup(userId, group.id, token))} />
+              <PrimaryButton label="Join" size="md" loading={isSaving} onPress={() => run(() => joinGroup(userId, group.id, token))} />
             </View>
           ) : null}
           {canInvite && (
-            <TouchableOpacity onPress={openInvites} className="flex-1 h-12 rounded-2xl bg-primary items-center justify-center">
-              <Text className="font-semibold text-white">Invite</Text>
-            </TouchableOpacity>
+            <View className="flex-1">
+              <PrimaryButton label="Invite" icon={UserPlus} size="md" onPress={openInvites} />
+            </View>
           )}
         </View>
 
         {!detail.content_visible ? (
-          <View className="mt-6">
+          <View className="mt-4">
             <EmptyState icon={Lock} title="Members only" body="Accept the invite to see the feed, map, and hangouts." />
           </View>
         ) : (
@@ -234,13 +258,11 @@ export default function GroupDetailScreen() {
             </View>
 
             {tab === 'feed' && (
-              <View className="mt-4">
+              <View className="mt-4 gap-3">
                 {detail.feed.length === 0 ? (
-                  <EmptyState icon={Users} title="No posts yet" body="Reviews show up here when someone tags this group." />
+                  <EmptyState icon={UsersRound} title="No posts yet" body="Reviews show up here when someone tags this group." />
                 ) : detail.feed.map((item) => (
-                  <View key={item.id} className="mb-3">
-                    <FeedCard item={item} />
-                  </View>
+                  <FeedCard key={item.id} item={item} />
                 ))}
               </View>
             )}
@@ -251,9 +273,10 @@ export default function GroupDetailScreen() {
                   <EmptyState icon={MapPin} title="No spots yet" body="Tagged reviews, hangouts posted here, and saved places land on this map." />
                 ) : (
                   <>
-                    <View className="h-64 rounded-3xl overflow-hidden border border-slate-200">
+                    <View className="h-64 rounded-2xl overflow-hidden bg-surface">
                       <MapView
                         style={{ flex: 1 }}
+                        userInterfaceStyle={scheme}
                         initialRegion={{
                           latitude: detail.spots[0].latitude,
                           longitude: detail.spots[0].longitude,
@@ -271,25 +294,21 @@ export default function GroupDetailScreen() {
                         ))}
                       </MapView>
                     </View>
-                    {detail.spots.map((space) => (
-                      <TouchableOpacity key={space.id} onPress={() => router.push(`/space/${space.id}` as never)} className="bg-white border border-slate-200 rounded-2xl px-4 py-3 mt-3">
-                        <Text className="font-bold text-ink">{space.name}</Text>
-                        <Text className="text-[13px] text-slate-500 mt-0.5" numberOfLines={1}>{space.address}</Text>
-                      </TouchableOpacity>
-                    ))}
+                    <View className="mt-3">
+                      <SpotList spots={detail.spots} onPressSpot={(space) => router.push(`/space/${space.id}` as never)} />
+                    </View>
                   </>
                 )}
                 {group.viewer_role && (
-                  <TouchableOpacity onPress={openAddSpot} className="mt-3 h-12 rounded-2xl bg-white border border-slate-200 flex-row items-center justify-center">
-                    <Plus size={16} color={colors.ink} />
-                    <Text className="font-semibold text-ink ml-2">Save a spot</Text>
-                  </TouchableOpacity>
+                  <View className="mt-3">
+                    <PrimaryButton label="Save a spot" icon={Plus} tone="neutral" size="md" onPress={openAddSpot} />
+                  </View>
                 )}
               </View>
             )}
 
             {tab === 'events' && (
-              <View className="mt-4">
+              <View className="mt-4 gap-3">
                 {detail.events.length === 0 ? (
                   <EmptyState
                     icon={CalendarDays}
@@ -299,29 +318,31 @@ export default function GroupDetailScreen() {
                     onAction={() => router.push('/event/new' as never)}
                   />
                 ) : detail.events.map((event, index) => (
-                  <View key={event.id} className="mb-3">
-                    <EventCard occurrence={occurrenceFor(detail, index)} />
-                  </View>
+                  <EventCard key={event.id} occurrence={occurrenceFor(detail, index)} />
                 ))}
               </View>
             )}
 
             {tab === 'people' && (
-              <View className="mt-4">
-                {detail.members.map((member) => (
-                  <View key={member.user_id} className="flex-row items-center bg-white border border-slate-200 rounded-2xl px-3 py-3 mb-2">
-                    <TouchableOpacity onPress={() => openProfile(member.user_id, userId)} className="flex-row items-center flex-1">
-                      <Avatar name={getDisplayName(member.profile)} size={40} />
-                      <View className="ml-3 flex-1">
-                        <Text className="font-bold text-ink">{getDisplayName(member.profile)}</Text>
-                        <Text className="text-[13px] text-slate-500">{member.role === 'owner' ? 'Owner' : 'Member'}</Text>
-                      </View>
-                    </TouchableOpacity>
-                    {group.viewer_role === 'owner' && member.user_id !== userId && member.role !== 'owner' && (
-                      <TouchableOpacity onPress={() => run(() => removeGroupMember(userId, group.id, member.user_id))}>
-                        <Text className="text-rose-600 font-semibold text-[13px]">Remove</Text>
-                      </TouchableOpacity>
-                    )}
+              <View className="mt-4 bg-surface rounded-2xl px-4 py-1">
+                {detail.members.map((member, index) => (
+                  <View key={member.user_id}>
+                    {index > 0 && <View className="h-px bg-line-soft ml-[56px]" />}
+                    <PersonRow
+                      name={getDisplayName(member.profile)}
+                      avatarUrl={member.profile.avatar_url}
+                      subtitle={member.role === 'owner' ? 'Owner' : 'Member'}
+                      onPress={() => openProfile(member.user_id, userId)}
+                      right={group.viewer_role === 'owner' && member.user_id !== userId && member.role !== 'owner' ? (
+                        <TouchableOpacity
+                          onPress={() => run(() => removeGroupMember(userId, group.id, member.user_id))}
+                          hitSlop={8}
+                          className="h-8 px-3 rounded-full bg-danger-soft items-center justify-center ml-2"
+                        >
+                          <Text className="text-danger font-semibold text-[13px]">Remove</Text>
+                        </TouchableOpacity>
+                      ) : undefined}
+                    />
                   </View>
                 ))}
               </View>
@@ -343,31 +364,45 @@ export default function GroupDetailScreen() {
         onInvite={invitePerson}
       />
 
-      <Modal visible={showSpots} animationType="slide" presentationStyle="pageSheet" onRequestClose={() => setShowSpots(false)}>
-        <SafeAreaView className="flex-1 bg-slate-50">
-          <View className="px-5 pt-3 pb-4 flex-row items-center justify-between">
-            <Text className="text-[22px] font-extrabold text-ink">Save a spot</Text>
-            <TouchableOpacity onPress={() => setShowSpots(false)}><Text className="text-primary font-semibold">Done</Text></TouchableOpacity>
-          </View>
-          <ScrollView contentContainerStyle={{ paddingHorizontal: 20, paddingBottom: 32 }}>
-            {rankings.length === 0 ? (
-              <Text className="text-slate-500">Rate a place first, then you can pin it here.</Text>
-            ) : rankings.map((space) => (
-              <TouchableOpacity
-                key={space.id}
-                onPress={() => run(async () => {
-                  await saveGroupSpot(userId, group.id, space.id);
-                  setShowSpots(false);
-                })}
-                className="bg-white border border-slate-200 rounded-2xl px-4 py-3 mb-2"
-              >
-                <Text className="font-bold text-ink">{space.name}</Text>
-                <Text className="text-[13px] text-slate-500 mt-0.5" numberOfLines={1}>{space.address}</Text>
-              </TouchableOpacity>
-            ))}
-          </ScrollView>
-        </SafeAreaView>
-      </Modal>
+      <Sheet
+        visible={showSpots}
+        onClose={() => setShowSpots(false)}
+        title="Save a spot"
+        subtitle={`Pin a place you've rated to ${group.name}.`}
+      >
+        {rankings.length === 0 ? (
+          <Text className="text-[15px] text-muted">Rate a place first, then you can pin it here.</Text>
+        ) : (
+          <SpotList
+            spots={rankings}
+            onPressSpot={(space) => run(async () => {
+              await saveGroupSpot(userId, group.id, space.id);
+              setShowSpots(false);
+            })}
+          />
+        )}
+      </Sheet>
     </SafeAreaView>
+  );
+}
+
+function SpotList({ spots, onPressSpot }: { spots: SpaceWithAttributes[]; onPressSpot: (space: SpaceWithAttributes) => void }) {
+  const colors = useColors();
+  return (
+    <View className="bg-surface rounded-2xl overflow-hidden">
+      {spots.map((space, index) => (
+        <View key={space.id}>
+          {index > 0 && <View className="h-px bg-line-soft ml-[64px]" />}
+          <TouchableOpacity onPress={() => onPressSpot(space)} activeOpacity={0.6} className="flex-row items-center px-4 py-3">
+            <CategoryIcon category={space.category} size={36} />
+            <View className="flex-1 mx-3">
+              <Text className="text-[16px] font-semibold text-ink" numberOfLines={1}>{space.name}</Text>
+              <Text className="text-[13px] text-muted mt-0.5" numberOfLines={1}>{space.address}</Text>
+            </View>
+            <ChevronRight size={18} color={colors.faint} />
+          </TouchableOpacity>
+        </View>
+      ))}
+    </View>
   );
 }

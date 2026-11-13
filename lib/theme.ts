@@ -1,91 +1,89 @@
+import { useColorScheme } from 'nativewind';
 import { Building2, Coffee, Gamepad2, Sunset, Trees, Trophy, Wine, type LucideIcon } from 'lucide-react-native';
 import type { SpaceCategory } from '@/types/space';
+import { palettes, type Palette } from './palettes';
 
-export const colors = {
-  primary: '#4f46e5',
-  primarySoft: '#eef2ff',
-  ink: '#0f172a',
-  body: '#334155',
-  muted: '#64748b',
-  subtle: '#94a3b8',
-  border: '#e2e8f0',
-  surface: '#ffffff',
-  background: '#f8fafc',
-  secret: '#7c3aed',
-  secretSoft: '#f5f3ff',
-  like: '#e11d48',
-  success: '#059669',
-  closed: '#dc2626',
-  warning: '#d97706',
-};
+export { palettes, type Palette };
+
+export type ColorScheme = 'light' | 'dark';
+
+export function useColorSchemeName(): ColorScheme {
+  return useColorScheme().colorScheme === 'dark' ? 'dark' : 'light';
+}
+
+export function useColors(): Palette {
+  return palettes[useColorSchemeName()];
+}
+
+/** Appends an alpha channel to a 6-digit hex color. */
+export function withAlpha(hex: string, alpha: number) {
+  const channel = Math.round(Math.min(1, Math.max(0, alpha)) * 255).toString(16).padStart(2, '0');
+  return `${hex.slice(0, 7)}${channel}`;
+}
 
 export interface CategoryMeta {
   short: string;
   blurb: string;
   icon: LucideIcon;
   color: string;
+  /** Translucent so it reads on both light and dark surfaces. */
   tint: string;
 }
 
+const category = (meta: Omit<CategoryMeta, 'tint'>): CategoryMeta => ({ ...meta, tint: withAlpha(meta.color, 0.14) });
+
 export const CATEGORY_META: Record<SpaceCategory, CategoryMeta> = {
-  'Cafe & Coworking': {
+  'Cafe & Coworking': category({
     short: 'Cafe',
     blurb: 'Cafes & coworking',
     icon: Coffee,
-    color: '#b45309',
-    tint: '#fef3c7',
-  },
-  'Park & Nature': {
+    color: '#b7791f',
+  }),
+  'Park & Nature': category({
     short: 'Park',
     blurb: 'Parks & nature',
     icon: Trees,
-    color: '#15803d',
-    tint: '#dcfce7',
-  },
-  'Sports Area': {
+    color: '#2f8a57',
+  }),
+  'Sports Area': category({
     short: 'Sports',
     blurb: 'Courts & fields',
     icon: Trophy,
-    color: '#ea580c',
-    tint: '#ffedd5',
-  },
-  'Smoke & Sunset Spots': {
+    color: '#dd6b20',
+  }),
+  'Smoke & Sunset Spots': category({
     short: 'Sunset',
     blurb: 'Sunset & smoke spots',
     icon: Sunset,
-    color: '#c026d3',
-    tint: '#fae8ff',
-  },
-  'Social Drinking Spots': {
+    color: '#c0417f',
+  }),
+  'Social Drinking Spots': category({
     short: 'Drinks',
     blurb: 'Bars & lounges',
     icon: Wine,
-    color: '#be123c',
-    tint: '#ffe4e6',
-  },
-  'Interactive Fun (Arcades, Board Games)': {
+    color: '#c53b4a',
+  }),
+  'Interactive Fun (Arcades, Board Games)': category({
     short: 'Games',
     blurb: 'Arcades & board games',
     icon: Gamepad2,
-    color: '#0f766e',
-    tint: '#ccfbf1',
-  },
-  'Public Architecture (Atriums, Hotel Lobbies)': {
+    color: '#2c8a8b',
+  }),
+  'Public Architecture (Atriums, Hotel Lobbies)': category({
     short: 'Lobbies',
     blurb: 'Atriums & hotel lobbies',
     icon: Building2,
-    color: '#1d4ed8',
-    tint: '#dbeafe',
-  },
+    color: '#3b6fc4',
+  }),
 };
 
-export function getScoreTone(score: number) {
-  if (score >= 80) return { text: '#047857', background: '#d1fae5' };
-  if (score >= 60) return { text: '#b45309', background: '#fef3c7' };
-  return { text: '#be123c', background: '#ffe4e6' };
+export function getScoreTone(score: number, palette: Palette) {
+  if (score >= 80) return { text: palette.success, background: palette.successSoft };
+  if (score >= 60) return { text: palette.warning, background: palette.warningSoft };
+  return { text: palette.danger, background: palette.dangerSoft };
 }
 
-const AVATAR_COLORS = ['#4f46e5', '#0891b2', '#db2777', '#ea580c', '#16a34a', '#7c3aed', '#0f766e', '#be123c'];
+const AVATAR_COLORS = ['#3f6f5a', '#4a6a8a', '#8a5a6e', '#9a6a3a', '#5a7a3a', '#6a5a8a', '#3a7a7a', '#8a4a4a'];
 
 export function getAvatarColor(seed: string) {
   const hash = Array.from(seed).reduce((total, character) => total + character.charCodeAt(0), 0);

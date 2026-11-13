@@ -1,23 +1,30 @@
-import React, { useCallback, useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import { ActivityIndicator, Alert, FlatList, RefreshControl, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router, useFocusEffect } from 'expo-router';
-import { Globe, MessageCircle, Plus, Users } from 'lucide-react-native';
+import { Globe, MessageCircle, UserCheck, UsersRound } from 'lucide-react-native';
 import FeedCard from '@/components/FeedCard';
 import { EmptyState, IconButton, ScreenHeader, SegmentedControl } from '@/components/ui';
 import { listRecentActivity, toggleFollow } from '@/lib/data';
 import { useAuth } from '@/lib/auth';
-import { colors } from '@/lib/theme';
+import { usePreferences } from '@/lib/preferences';
+import { useColors } from '@/lib/theme';
 import type { FeedActivity } from '@/types/space';
 
 type FeedScope = 'public' | 'following';
 
 export default function FeedScreen() {
+  const colors = useColors();
   const { userId } = useAuth();
+  const { preferences, isLoaded } = usePreferences();
   const [activity, setActivity] = useState<FeedActivity[]>([]);
-  const [feedScope, setFeedScope] = useState<FeedScope>('public');
+  const [feedScope, setFeedScope] = useState<FeedScope>(preferences.defaultFeed);
   const [isLoading, setIsLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+
+  useEffect(() => {
+    if (isLoaded) setFeedScope(preferences.defaultFeed);
+  }, [isLoaded, preferences.defaultFeed]);
 
   const loadActivity = useCallback(async () => {
     try {
@@ -59,12 +66,12 @@ export default function FeedScreen() {
   };
 
   return (
-    <SafeAreaView edges={['top']} className="flex-1 bg-slate-50">
+    <SafeAreaView edges={['top']} className="flex-1 bg-canvas">
       <FlatList
         data={isLoading ? [] : activity}
         keyExtractor={(item) => item.id}
         contentContainerStyle={{ paddingBottom: 24 }}
-        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.primary} />}
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.muted} />}
         ItemSeparatorComponent={() => <View className="h-3" />}
         ListHeaderComponent={
           <View className="pb-4">
@@ -73,19 +80,18 @@ export default function FeedScreen() {
               subtitle="Fresh takes on spots around you"
               right={(
                 <View className="flex-row gap-2">
+                  <IconButton icon={UsersRound} onPress={() => router.push('/groups' as never)} accessibilityLabel="Groups" />
                   <IconButton icon={MessageCircle} onPress={() => router.push('/chats' as never)} accessibilityLabel="Chats" />
-                  <IconButton icon={Users} onPress={() => router.push('/groups' as never)} accessibilityLabel="Groups" />
-                  <IconButton icon={Plus} onPress={() => router.push('/rank' as never)} accessibilityLabel="Rate a spot" />
                 </View>
               )}
             />
             <SegmentedControl
-              style={{ marginHorizontal: 20 }}
+              style={{ marginHorizontal: 16 }}
               value={feedScope}
               onChange={changeScope}
               options={[
                 { value: 'public', label: 'Public', icon: Globe },
-                { value: 'following', label: 'Following', icon: Users },
+                { value: 'following', label: 'Following', icon: UserCheck },
               ]}
             />
           </View>
@@ -98,13 +104,13 @@ export default function FeedScreen() {
         ListEmptyComponent={
           isLoading ? (
             <View className="py-16 items-center">
-              <ActivityIndicator color={colors.primary} />
+              <ActivityIndicator color={colors.muted} />
             </View>
           ) : (
             <View className="px-4">
               {feedScope === 'following' ? (
                 <EmptyState
-                  icon={Users}
+                  icon={UserCheck}
                   title="Nobody here yet"
                   body="Follow people from the Public feed and their reviews will show up here."
                   actionLabel="Browse Public"

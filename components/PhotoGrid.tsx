@@ -27,12 +27,12 @@ export default function PhotoGrid({ photos, onPressPhoto, size = 88, maxVisible 
             activeOpacity={0.85}
             accessibilityLabel={showOverflow ? `View all ${photos.length} photos` : 'View photo'}
             style={{ width: size, height: size }}
-            className="rounded-xl overflow-hidden bg-slate-100"
+            className="rounded-xl overflow-hidden bg-fill"
           >
             <Image source={{ uri: photo.url }} style={{ width: size, height: size }} contentFit="cover" transition={150} />
             {showOverflow && (
               <View className="absolute inset-0 bg-black/50 items-center justify-center">
-                <Text className="text-white font-bold text-base">+{hiddenCount + 1}</Text>
+                <Text className="text-white font-semibold text-[16px]">+{hiddenCount + 1}</Text>
               </View>
             )}
           </TouchableOpacity>

@@ -1,17 +1,17 @@
 import React, { useEffect, useState } from 'react';
-import { Alert, KeyboardAvoidingView, Platform, ScrollView, Switch, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { Alert, KeyboardAvoidingView, Platform, ScrollView, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import DateTimePicker from '@react-native-community/datetimepicker';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router, useLocalSearchParams } from 'expo-router';
-import { Globe, Lock } from 'lucide-react-native';
+import { Globe, KeyRound, Lock } from 'lucide-react-native';
 import { EventPoster, ThemePicker } from '@/components/EventPoster';
 import PlacePicker, { type PickedPlace } from '@/components/PlacePicker';
-import { Chip, PrimaryButton, SegmentedControl } from '@/components/ui';
+import { Chip, PrimaryButton, SegmentedControl, ToggleRow } from '@/components/ui';
 import { useAuth } from '@/lib/auth';
 import { createHostedEvent, listMyGroups } from '@/lib/data';
 import { formatEventTime, parseDateKey, parseEventTime, toDateKey } from '@/lib/events';
 import { eventHref, requireSignedIn } from '@/lib/links';
-import { CATEGORY_META, colors } from '@/lib/theme';
+import { CATEGORY_META, useColors, useColorSchemeName } from '@/lib/theme';
 import { CATEGORY_CONFIG, SPACE_CATEGORIES, type EventTheme, type EventVisibility, type Group, type SpaceCategory, type ThirdSpace } from '@/types/space';
 
 const defaultStart = () => {
@@ -27,7 +27,24 @@ const startOfToday = () => {
   return date;
 };
 
+const inputClass = 'bg-surface rounded-xl h-12 px-4 text-[16px] text-ink';
+const groupedInputClass = 'h-12 px-4 text-[16px] text-ink';
+
+function FieldLabel({ children }: { children: string }) {
+  return <Text className="text-[13px] font-medium text-muted mt-6 mb-1.5 ml-1">{children}</Text>;
+}
+
+function FieldHint({ children }: { children: string }) {
+  return <Text className="text-[13px] text-muted mt-1.5 mx-1 leading-[18px]">{children}</Text>;
+}
+
+function Hairline() {
+  return <View className="h-px bg-line-soft ml-4" />;
+}
+
 function WhenPicker({ value, onChange }: { value: Date; onChange: (next: Date) => void }) {
+  const colors = useColors();
+  const scheme = useColorSchemeName();
   const [androidMode, setAndroidMode] = useState<'date' | 'time' | null>(null);
   const [webDate, setWebDate] = useState(() => toDateKey(value));
   const [webTime, setWebTime] = useState(() => formatEventTime(`${String(value.getHours()).padStart(2, '0')}:${String(value.getMinutes()).padStart(2, '0')}`) || '');
@@ -40,6 +57,7 @@ function WhenPicker({ value, onChange }: { value: Date; onChange: (next: Date) =
   };
 
   const rowClass = 'flex-row items-center justify-between px-4 min-h-[52px]';
+  const valuePillClass = 'bg-fill rounded-lg px-3 h-9 items-center justify-center';
   const dateLabel = value.toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' });
   const timeLabel = value.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' });
 
@@ -53,25 +71,28 @@ function WhenPicker({ value, onChange }: { value: Date; onChange: (next: Date) =
       onChange(next);
     };
     return (
-      <View className="bg-white border border-slate-200 rounded-2xl">
-        <View className={`${rowClass} border-b border-slate-100`}>
-          <Text className="text-base text-ink">Date</Text>
+      <View className="bg-surface rounded-2xl">
+        <View className={rowClass}>
+          <Text className="text-[16px] text-ink">Date</Text>
           <TextInput
             value={webDate}
             onChangeText={(text) => { setWebDate(text); applyWeb(text, webTime); }}
             placeholder="YYYY-MM-DD"
             placeholderTextColor={colors.subtle}
-            className="text-base text-primary text-right flex-1 ml-4"
+            keyboardAppearance={scheme}
+            className="text-[16px] text-ink text-right flex-1 ml-4"
           />
         </View>
+        <Hairline />
         <View className={rowClass}>
-          <Text className="text-base text-ink">Time</Text>
+          <Text className="text-[16px] text-ink">Time</Text>
           <TextInput
             value={webTime}
             onChangeText={(text) => { setWebTime(text); applyWeb(webDate, text); }}
             placeholder="7:30 PM"
             placeholderTextColor={colors.subtle}
-            className="text-base text-primary text-right flex-1 ml-4"
+            keyboardAppearance={scheme}
+            className="text-[16px] text-ink text-right flex-1 ml-4"
           />
         </View>
       </View>
@@ -80,26 +101,29 @@ function WhenPicker({ value, onChange }: { value: Date; onChange: (next: Date) =
 
   if (Platform.OS === 'ios') {
     return (
-      <View className="bg-white border border-slate-200 rounded-2xl">
-        <View className={`${rowClass} border-b border-slate-100`}>
-          <Text className="text-base text-ink">Date</Text>
+      <View className="bg-surface rounded-2xl">
+        <View className={rowClass}>
+          <Text className="text-[16px] text-ink">Date</Text>
           <DateTimePicker
             value={value}
             mode="date"
             display="compact"
             minimumDate={startOfToday()}
             accentColor={colors.primary}
+            themeVariant={scheme}
             onChange={(_, picked) => picked && merge(picked, 'date')}
           />
         </View>
+        <Hairline />
         <View className={rowClass}>
-          <Text className="text-base text-ink">Time</Text>
+          <Text className="text-[16px] text-ink">Time</Text>
           <DateTimePicker
             value={value}
             mode="time"
             display="compact"
             minuteInterval={5}
             accentColor={colors.primary}
+            themeVariant={scheme}
             onChange={(_, picked) => picked && merge(picked, 'time')}
           />
         </View>
@@ -108,19 +132,25 @@ function WhenPicker({ value, onChange }: { value: Date; onChange: (next: Date) =
   }
 
   return (
-    <View className="bg-white border border-slate-200 rounded-2xl">
-      <TouchableOpacity onPress={() => setAndroidMode('date')} className={`${rowClass} border-b border-slate-100`} activeOpacity={0.7}>
-        <Text className="text-base text-ink">Date</Text>
-        <Text className="text-base font-semibold text-primary">{dateLabel}</Text>
+    <View className="bg-surface rounded-2xl">
+      <TouchableOpacity onPress={() => setAndroidMode('date')} className={rowClass} activeOpacity={0.6}>
+        <Text className="text-[16px] text-ink">Date</Text>
+        <View className={valuePillClass}>
+          <Text className="text-[15px] font-medium text-ink">{dateLabel}</Text>
+        </View>
       </TouchableOpacity>
-      <TouchableOpacity onPress={() => setAndroidMode('time')} className={rowClass} activeOpacity={0.7}>
-        <Text className="text-base text-ink">Time</Text>
-        <Text className="text-base font-semibold text-primary">{timeLabel}</Text>
+      <Hairline />
+      <TouchableOpacity onPress={() => setAndroidMode('time')} className={rowClass} activeOpacity={0.6}>
+        <Text className="text-[16px] text-ink">Time</Text>
+        <View className={valuePillClass}>
+          <Text className="text-[15px] font-medium text-ink">{timeLabel}</Text>
+        </View>
       </TouchableOpacity>
       {androidMode && (
         <DateTimePicker
           value={value}
           mode={androidMode}
+          themeVariant={scheme}
           minimumDate={androidMode === 'date' ? startOfToday() : undefined}
           onChange={(event, picked) => {
             const mode = androidMode;
@@ -147,6 +177,8 @@ function normalizeUrl(value: string) {
 }
 
 export default function NewEventScreen() {
+  const colors = useColors();
+  const scheme = useColorSchemeName();
   const { user, userId } = useAuth();
   const params = useLocalSearchParams<{ spaceId?: string; lat?: string; lng?: string }>();
   const presetSpaceId = typeof params.spaceId === 'string' ? params.spaceId : undefined;
@@ -247,9 +279,9 @@ export default function NewEventScreen() {
   };
 
   return (
-    <SafeAreaView edges={['bottom']} className="flex-1 bg-slate-50">
+    <SafeAreaView edges={['bottom']} className="flex-1 bg-canvas">
       <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} className="flex-1">
-        <ScrollView contentContainerStyle={{ padding: 20, paddingBottom: 40 }} keyboardShouldPersistTaps="handled">
+        <ScrollView contentContainerStyle={{ padding: 16, paddingBottom: 40 }} keyboardShouldPersistTaps="handled">
           <EventPoster
             title={title}
             when={when.toLocaleString(undefined, { weekday: 'short', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}
@@ -257,11 +289,11 @@ export default function NewEventScreen() {
             visibility={effectiveVisibility}
             theme={theme}
           />
-          <View className="mt-3 mb-5">
+          <View className="mt-3">
             <ThemePicker value={theme} onChange={setTheme} />
           </View>
 
-          <Text className="text-[13px] font-bold text-slate-400 uppercase tracking-wider mb-2">Where</Text>
+          <FieldLabel>Where</FieldLabel>
           <PlacePicker
             userId={userId}
             presetSpaceId={presetSpaceId}
@@ -270,23 +302,24 @@ export default function NewEventScreen() {
           />
 
           {place && !place.existing && (
-            <View className="mt-4">
-              <Text className="text-[13px] font-bold text-slate-400 uppercase tracking-wider mb-2">Place name</Text>
+            <View>
+              <FieldLabel>Place name</FieldLabel>
               <TextInput
                 value={placeName}
                 onChangeText={setPlaceName}
                 placeholder="What should we call this spot?"
                 placeholderTextColor={colors.subtle}
-                className="bg-white border border-slate-200 rounded-2xl px-4 h-[52px] text-base text-ink"
+                keyboardAppearance={scheme}
+                className={inputClass}
               />
-              <Text className="text-[13px] font-bold text-slate-400 uppercase tracking-wider mt-4 mb-2">What kind of spot?</Text>
+              <FieldLabel>What kind of spot?</FieldLabel>
               <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8 }}>
                 {SPACE_CATEGORIES.map((value) => (
                   <Chip
                     key={value}
                     label={CATEGORY_META[value].short}
                     icon={CATEGORY_META[value].icon}
-                    color={CATEGORY_META[value].color}
+                    iconColor={CATEGORY_META[value].color}
                     selected={category === value}
                     onPress={() => setCategory(value)}
                   />
@@ -295,24 +328,28 @@ export default function NewEventScreen() {
             </View>
           )}
 
-          <Text className="text-[13px] font-bold text-slate-400 uppercase tracking-wider mt-6 mb-2">What are we doing?</Text>
+          <FieldLabel>What are we doing?</FieldLabel>
           <TextInput
             value={title}
             onChangeText={setTitle}
             placeholder="Sunset hang, trivia, cowork..."
             placeholderTextColor={colors.subtle}
+            keyboardAppearance={scheme}
             maxLength={60}
-            className="bg-white border border-slate-200 rounded-2xl px-4 h-[52px] text-base text-ink"
+            className={inputClass}
           />
 
-          <Text className="text-[13px] font-bold text-slate-400 uppercase tracking-wider mt-6 mb-2">When</Text>
+          <FieldLabel>When</FieldLabel>
           <WhenPicker value={when} onChange={setWhen} />
 
-          <Text className="text-[13px] font-bold text-slate-400 uppercase tracking-wider mt-6 mb-2">Who can see it</Text>
+          <FieldLabel>Who can see it</FieldLabel>
           {secretPlace ? (
-            <View className="bg-secret/5 border border-secret/20 rounded-2xl p-4">
-              <Text className="font-bold text-ink">Private only</Text>
-              <Text className="text-slate-600 mt-1">This is a secret spot, so the hangout stays link-only.</Text>
+            <View className="bg-secret-soft rounded-2xl p-4 flex-row">
+              <KeyRound size={18} color={colors.secret} style={{ marginTop: 1 }} />
+              <View className="flex-1 ml-3">
+                <Text className="text-[16px] font-semibold text-ink">Private only</Text>
+                <Text className="text-[14px] text-body mt-0.5 leading-5">This is a secret spot, so the hangout stays link-only.</Text>
+              </View>
             </View>
           ) : (
             <>
@@ -324,17 +361,17 @@ export default function NewEventScreen() {
                   { value: 'private', label: 'Private', icon: Lock },
                 ]}
               />
-              <Text className="text-[13px] text-slate-500 mt-2">
+              <FieldHint>
                 {visibility === 'public'
                   ? 'Anyone nearby can see it on the calendar and map.'
                   : 'Hidden from the public calendar and map. Invite a group, or send the link to specific people.'}
-              </Text>
+              </FieldHint>
             </>
           )}
 
-          <Text className="text-[13px] font-bold text-slate-400 uppercase tracking-wider mt-6 mb-2">Post to groups</Text>
+          <FieldLabel>Post to groups</FieldLabel>
           {groups.length === 0 ? (
-            <Text className="text-[13px] text-slate-500">Groups you belong to show up here, so one hangout reaches the whole crew.</Text>
+            <Text className="text-[13px] text-muted mx-1 leading-[18px]">Groups you belong to show up here, so one hangout reaches the whole crew.</Text>
           ) : (
             <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8 }}>
               {groups.map((group) => (
@@ -350,50 +387,54 @@ export default function NewEventScreen() {
             </ScrollView>
           )}
 
-          <Text className="text-[13px] font-bold text-slate-400 uppercase tracking-wider mt-6 mb-2">Optional</Text>
-          <TextInput
-            value={capacityText}
-            onChangeText={setCapacityText}
-            placeholder="Cap (leave blank for no limit)"
-            placeholderTextColor={colors.subtle}
-            keyboardType="number-pad"
-            className="bg-white border border-slate-200 rounded-2xl px-4 h-[52px] text-base text-ink"
-          />
-          {capacityText.trim().length > 0 && (
-            <View className="bg-white border border-slate-200 rounded-2xl px-4 py-3 mt-3 flex-row items-center">
-              <View className="flex-1 pr-3">
-                <Text className="font-semibold text-ink">Let people join past the cap</Text>
-                <Text className="text-[13px] text-slate-500 mt-0.5">
-                  {allowOverCapacity ? 'The cap is a target. RSVPs stay open.' : 'RSVPs close once the cap is hit.'}
-                </Text>
-              </View>
-              <Switch
-                value={allowOverCapacity}
-                onValueChange={setAllowOverCapacity}
-                trackColor={{ true: colors.primary, false: colors.border }}
-              />
-            </View>
-          )}
-          <TextInput
-            value={linkText}
-            onChangeText={setLinkText}
-            placeholder="Partiful, Luma, Instagram..."
-            placeholderTextColor={colors.subtle}
-            autoCapitalize="none"
-            autoCorrect={false}
-            className="bg-white border border-slate-200 rounded-2xl px-4 h-[52px] text-base text-ink mt-3"
-          />
-          <TextInput
-            value={notes}
-            onChangeText={setNotes}
-            placeholder="Bring a blanket, we'll be on the patio"
-            placeholderTextColor={colors.subtle}
-            multiline
-            maxLength={800}
-            className="bg-white border border-slate-200 rounded-2xl px-4 py-3 min-h-[96px] text-base text-ink mt-3"
-          />
+          <FieldLabel>Optional</FieldLabel>
+          <View className="bg-surface rounded-2xl overflow-hidden">
+            <TextInput
+              value={capacityText}
+              onChangeText={setCapacityText}
+              placeholder="Cap (leave blank for no limit)"
+              placeholderTextColor={colors.subtle}
+              keyboardAppearance={scheme}
+              keyboardType="number-pad"
+              className={groupedInputClass}
+            />
+            {capacityText.trim().length > 0 && (
+              <>
+                <Hairline />
+                <ToggleRow
+                  title="Let people join past the cap"
+                  subtitle={allowOverCapacity ? 'The cap is a target. RSVPs stay open.' : 'RSVPs close once the cap is hit.'}
+                  value={allowOverCapacity}
+                  onValueChange={setAllowOverCapacity}
+                />
+              </>
+            )}
+            <Hairline />
+            <TextInput
+              value={linkText}
+              onChangeText={setLinkText}
+              placeholder="Partiful, Luma, Instagram..."
+              placeholderTextColor={colors.subtle}
+              keyboardAppearance={scheme}
+              autoCapitalize="none"
+              autoCorrect={false}
+              className={groupedInputClass}
+            />
+            <Hairline />
+            <TextInput
+              value={notes}
+              onChangeText={setNotes}
+              placeholder="Bring a blanket, we'll be on the patio"
+              placeholderTextColor={colors.subtle}
+              keyboardAppearance={scheme}
+              multiline
+              textAlignVertical="top"
+              maxLength={800}
+              className="px-4 py-3 min-h-[96px] text-[16px] text-ink"
+            />
+          </View>
 
-          <View className="mt-6">
+          <View className="mt-8">
             <PrimaryButton
               label="Publish hangout"
               onPress={publish}

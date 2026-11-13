@@ -2,33 +2,49 @@ import React, { useCallback, useState } from 'react';
 import { ActivityIndicator, Alert, RefreshControl, ScrollView, Text, TouchableOpacity, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router, useFocusEffect } from 'expo-router';
-import { ChevronRight, Globe, Lock, Plus, Users } from 'lucide-react-native';
-import { EmptyState } from '@/components/ui';
+import { ChevronRight, Globe, Lock, Plus, UsersRound } from 'lucide-react-native';
+import { Avatar, EmptyState, GroupLabel } from '@/components/ui';
 import { useAuth } from '@/lib/auth';
 import { listMyGroups, listPublicGroups } from '@/lib/data';
-import { colors } from '@/lib/theme';
+import { useColors } from '@/lib/theme';
 import type { Group } from '@/types/space';
 
 function GroupRow({ group, onPress }: { group: Group; onPress: () => void }) {
+  const colors = useColors();
   const Icon = group.visibility === 'private' ? Lock : Globe;
   return (
-    <TouchableOpacity onPress={onPress} activeOpacity={0.8} className="bg-white border border-slate-200 rounded-3xl px-4 py-4 mb-3 flex-row items-center">
-      <View className="w-11 h-11 rounded-2xl bg-primary/10 items-center justify-center">
-        <Icon size={18} color={colors.primary} />
+    <TouchableOpacity onPress={onPress} activeOpacity={0.6} className="px-4 py-3 flex-row items-center">
+      <Avatar name={group.name} size={44} />
+      <View className="flex-1 ml-3 mr-2">
+        <Text className="text-[16px] font-semibold text-ink" numberOfLines={1}>{group.name}</Text>
+        <View className="flex-row items-center mt-0.5">
+          <Icon size={12} color={colors.muted} />
+          <Text className="text-[13px] text-muted ml-1" numberOfLines={1}>
+            {group.visibility === 'private' ? 'Private' : 'Public'} · {group.member_count} {group.member_count === 1 ? 'member' : 'members'}
+          </Text>
+        </View>
+        {group.description ? <Text className="text-[14px] text-body mt-1 leading-5" numberOfLines={2}>{group.description}</Text> : null}
       </View>
-      <View className="flex-1 ml-3">
-        <Text className="text-[16px] font-bold text-ink">{group.name}</Text>
-        <Text className="text-[13px] text-slate-500 mt-0.5" numberOfLines={1}>
-          {group.visibility === 'private' ? 'Private' : 'Public'} · {group.member_count} {group.member_count === 1 ? 'member' : 'members'}
-        </Text>
-        {group.description ? <Text className="text-[13px] text-slate-600 mt-1" numberOfLines={2}>{group.description}</Text> : null}
-      </View>
-      <ChevronRight size={18} color={colors.subtle} />
+      <ChevronRight size={18} color={colors.faint} />
     </TouchableOpacity>
   );
 }
 
+function GroupList({ groups }: { groups: Group[] }) {
+  return (
+    <View className="bg-surface rounded-2xl overflow-hidden">
+      {groups.map((group, index) => (
+        <View key={group.id}>
+          {index > 0 && <View className="h-px bg-line-soft ml-[72px]" />}
+          <GroupRow group={group} onPress={() => router.push(`/groups/${group.id}` as never)} />
+        </View>
+      ))}
+    </View>
+  );
+}
+
 export default function GroupsScreen() {
+  const colors = useColors();
   const { userId } = useAuth();
   const [mine, setMine] = useState<Group[]>([]);
   const [discover, setDiscover] = useState<Group[]>([]);
@@ -55,45 +71,50 @@ export default function GroupsScreen() {
   useFocusEffect(useCallback(() => { load(); }, [load]));
 
   return (
-    <SafeAreaView edges={['bottom']} className="flex-1 bg-slate-50">
+    <SafeAreaView edges={['bottom']} className="flex-1 bg-canvas">
       <ScrollView
-        contentContainerStyle={{ padding: 20, paddingBottom: 40 }}
+        contentContainerStyle={{ padding: 16, paddingTop: 4, paddingBottom: 40 }}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => { setRefreshing(true); load(); }} tintColor={colors.primary} />}
       >
-        <View className="flex-row items-center justify-between mb-4">
-          <Text className="text-[15px] text-slate-500 flex-1 pr-3">A shared map and feed for the people you actually hang out with.</Text>
+        <View className="flex-row items-center justify-between mb-6 px-1">
+          <Text className="text-[15px] text-muted flex-1 pr-4 leading-5">A shared map and feed for the people you actually hang out with.</Text>
           <TouchableOpacity
             onPress={() => router.push('/groups/new' as never)}
             accessibilityLabel="Create a group"
-            className="w-11 h-11 rounded-full bg-primary items-center justify-center"
+            accessibilityRole="button"
+            activeOpacity={0.8}
+            className="h-9 pl-3 pr-3.5 rounded-full bg-primary flex-row items-center"
           >
-            <Plus size={20} color="white" />
+            <Plus size={16} color={colors.onPrimary} />
+            <Text className="text-[14px] font-semibold text-white ml-1">New</Text>
           </TouchableOpacity>
         </View>
 
         {isLoading ? (
-          <ActivityIndicator color={colors.primary} style={{ marginTop: 32 }} />
+          <ActivityIndicator color={colors.muted} style={{ marginTop: 32 }} />
         ) : (
           <>
-            <Text className="text-[13px] font-bold text-slate-400 uppercase tracking-wider mb-2">Yours</Text>
+            <GroupLabel>Your groups</GroupLabel>
             {mine.length === 0 ? (
               <EmptyState
-                icon={Users}
+                icon={UsersRound}
                 title="No groups yet"
                 body="Start a private crew, or join a public one below."
                 actionLabel="Create a group"
                 onAction={() => router.push('/groups/new' as never)}
               />
-            ) : mine.map((group) => (
-              <GroupRow key={group.id} group={group} onPress={() => router.push(`/groups/${group.id}` as never)} />
-            ))}
+            ) : (
+              <GroupList groups={mine} />
+            )}
 
-            <Text className="text-[13px] font-bold text-slate-400 uppercase tracking-wider mt-6 mb-2">Discover</Text>
-            {discover.length === 0 ? (
-              <Text className="text-[14px] text-slate-500">No public groups to join right now.</Text>
-            ) : discover.map((group) => (
-              <GroupRow key={group.id} group={group} onPress={() => router.push(`/groups/${group.id}` as never)} />
-            ))}
+            <View className="mt-7">
+              <GroupLabel>Discover</GroupLabel>
+              {discover.length === 0 ? (
+                <Text className="text-[15px] text-muted px-4">No public groups to join right now.</Text>
+              ) : (
+                <GroupList groups={discover} />
+              )}
+            </View>
           </>
         )}
       </ScrollView>

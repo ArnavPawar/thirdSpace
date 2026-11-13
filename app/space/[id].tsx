@@ -8,23 +8,24 @@ import EventCard from '@/components/EventCard';
 import FeedCard from '@/components/FeedCard';
 import PhotoGrid from '@/components/PhotoGrid';
 import PhotoViewer from '@/components/PhotoViewer';
-import { CategoryIcon, EmptyState, OpenStatusBadge, ScorePill, SectionTitle } from '@/components/ui';
+import { CategoryIcon, EmptyState, OpenStatusBadge, PrimaryButton, ScorePill, SectionTitle } from '@/components/ui';
 import { useAuth } from '@/lib/auth';
 import { getSpaceDetails, listSpaceEvents, listSpacePhotos, toggleFavorite } from '@/lib/data';
 import { toDateKey } from '@/lib/events';
 import { openDirections, openExternalUrl, shareSpace } from '@/lib/links';
-import { CATEGORY_META, colors } from '@/lib/theme';
+import { CATEGORY_META, useColors } from '@/lib/theme';
 import type { ReviewPhoto, SpaceDetails, SpaceEvent } from '@/types/space';
 
 const GALLERY_COLUMNS = 4;
 const GALLERY_GAP = 8;
-const GALLERY_HORIZONTAL_INSET = 16 * 2 + 20 * 2;
+const GALLERY_HORIZONTAL_INSET = 16 * 2;
 
 export default function SpaceDetailsScreen() {
+  const colors = useColors();
   const { id } = useLocalSearchParams<{ id: string }>();
   const { userId } = useAuth();
   const { width } = useWindowDimensions();
-  const scrollRef = useRef<ScrollView>(null);
+  const scrollRef = useRef<React.ComponentRef<typeof ScrollView>>(null);
   const reviewsOffset = useRef(0);
   const reviewOffsets = useRef<Record<string, number>>({});
   const [space, setSpace] = useState<SpaceDetails | null>(null);
@@ -70,7 +71,7 @@ export default function SpaceDetailsScreen() {
 
   if (isLoading) {
     return (
-      <View className="flex-1 bg-slate-50 items-center justify-center">
+      <View className="flex-1 bg-canvas items-center justify-center">
         <ActivityIndicator color={colors.primary} />
       </View>
     );
@@ -78,7 +79,7 @@ export default function SpaceDetailsScreen() {
 
   if (!space) {
     return (
-      <SafeAreaView edges={['bottom']} className="flex-1 bg-slate-50 justify-center px-5">
+      <SafeAreaView edges={['bottom']} className="flex-1 bg-canvas justify-center px-5">
         <EmptyState
           icon={Lock}
           title="Spot unavailable"
@@ -118,64 +119,83 @@ export default function SpaceDetailsScreen() {
   };
 
   return (
-    <SafeAreaView edges={['bottom']} className="flex-1 bg-slate-50">
+    <SafeAreaView edges={['bottom']} className="flex-1 bg-canvas">
       <ScrollView ref={scrollRef} contentContainerStyle={{ padding: 16, paddingTop: 4, paddingBottom: 32 }}>
-        <View className="bg-white rounded-3xl border border-slate-200 overflow-hidden">
-          <View style={{ backgroundColor: meta.tint }} className="px-5 pt-5 pb-4">
-            <View className="flex-row items-start">
-              <CategoryIcon category={space.category} size={56} />
-              <View className="flex-1 ml-4">
-                <Text style={{ color: meta.color }} className="text-xs font-bold uppercase tracking-wider">{meta.blurb}</Text>
-                <Text className="text-2xl font-extrabold text-ink mt-1">{space.name}</Text>
-                {space.primary_purpose && <Text className="text-slate-600 mt-0.5">Best for {space.primary_purpose.toLowerCase()}</Text>}
-              </View>
-              {space.attributes && (
-                <View className="items-center ml-2">
-                  <ScorePill score={space.attributes.overall_score} />
-                  <Text className="text-[10px] text-slate-500 mt-1">{space.attributes.total_ratings} ratings</Text>
-                </View>
-              )}
-            </View>
-          </View>
-
-          <View className="px-5 py-4">
-            <View className="flex-row items-start">
-              <MapPin size={15} color={colors.subtle} />
-              <Text className="text-sm text-slate-600 ml-2 flex-1">{space.address}</Text>
-            </View>
-            {space.hours && (
-              <View className="flex-row items-start mt-2">
-                <Clock size={15} color={colors.subtle} />
-                <View className="ml-2 flex-1">
-                  <OpenStatusBadge hours={space.hours} />
-                  <Text className="text-sm text-slate-600 mt-0.5">{space.hours}</Text>
-                </View>
+        <View className="px-1 pt-1">
+          <View className="flex-row items-start justify-between">
+            <CategoryIcon category={space.category} size={52} />
+            {space.attributes && (
+              <View className="items-end">
+                <ScorePill score={space.attributes.overall_score} />
+                <Text className="text-[12px] text-muted mt-1">
+                  {space.attributes.total_ratings} {space.attributes.total_ratings === 1 ? 'rating' : 'ratings'}
+                </Text>
               </View>
             )}
-            {space.description && <Text className="text-[15px] text-slate-700 leading-[22px] mt-3">{space.description}</Text>}
           </View>
+          <Text className="text-[26px] font-bold text-ink tracking-tight mt-3">{space.name}</Text>
+          <Text className="text-[15px] text-muted mt-0.5">
+            {meta.blurb}
+            {space.primary_purpose ? ` · Best for ${space.primary_purpose.toLowerCase()}` : ''}
+          </Text>
 
-          <View className="flex-row border-t border-slate-100 px-2 py-2">
-            {actions.map((action) => {
-              const Icon = action.icon;
-              return (
-                <TouchableOpacity key={action.key} onPress={action.onPress} activeOpacity={0.7} className="flex-1 items-center py-2">
-                  <Icon
-                    size={20}
-                    color={action.active ? colors.like : colors.body}
-                    fill={action.active ? colors.like : 'transparent'}
-                  />
-                  <Text className={`text-xs font-semibold mt-1 ${action.active ? 'text-rose-600' : 'text-slate-600'}`}>{action.label}</Text>
-                </TouchableOpacity>
-              );
-            })}
+          <View className="flex-row items-start mt-3">
+            <View className="mt-0.5">
+              <MapPin size={14} color={colors.subtle} />
+            </View>
+            <Text className="text-[14px] text-body ml-2 flex-1 leading-5">{space.address}</Text>
           </View>
+          {space.hours && (
+            <View className="flex-row items-start mt-2">
+              <View className="mt-0.5">
+                <Clock size={14} color={colors.subtle} />
+              </View>
+              <View className="ml-2 flex-1">
+                <OpenStatusBadge hours={space.hours} />
+                <Text className="text-[13px] text-muted mt-0.5 leading-[18px]">{space.hours}</Text>
+              </View>
+            </View>
+          )}
+          {space.description && <Text className="text-[15px] text-body leading-[22px] mt-3">{space.description}</Text>}
+        </View>
+
+        <View className="flex-row gap-2 mt-5">
+          {actions.map((action) => {
+            const Icon = action.icon;
+            const tint = action.active ? colors.like : colors.ink;
+            return (
+              <TouchableOpacity
+                key={action.key}
+                onPress={action.onPress}
+                activeOpacity={0.7}
+                accessibilityRole="button"
+                className="flex-1 bg-surface rounded-xl items-center justify-center py-2.5"
+              >
+                <Icon size={18} color={tint} fill={action.active ? colors.like : 'transparent'} />
+                <Text style={{ color: tint }} className="text-[12px] font-medium mt-1">{action.label}</Text>
+              </TouchableOpacity>
+            );
+          })}
+        </View>
+
+        <View className="mt-3 gap-2">
+          <PrimaryButton
+            label="Rate this spot"
+            icon={Plus}
+            onPress={() => router.push({ pathname: '/rank', params: { spaceId: space.id } } as never)}
+          />
+          <PrimaryButton
+            label="Host an event here"
+            icon={CalendarDays}
+            tone="neutral"
+            onPress={() => router.push({ pathname: '/event/new', params: { spaceId: space.id } } as never)}
+          />
         </View>
 
         {space.is_secret && (
-          <View className="mt-3 bg-secret/5 border border-secret/20 rounded-2xl p-4 flex-row items-center">
+          <View className="mt-4 bg-secret-soft rounded-2xl p-4 flex-row items-center">
             <KeyRound size={18} color={colors.secret} />
-            <Text className="text-[13px] text-slate-700 ml-2.5 flex-1 leading-[18px]">
+            <Text className="text-[13px] text-body ml-3 flex-1 leading-[18px]">
               {isOwner
                 ? "This is your secret spot. It's hidden from the map and feed. Approve requests from the Secret tab on your profile."
                 : 'Secret spot. You were let in, so keep it on the down-low.'}
@@ -184,13 +204,8 @@ export default function SpaceDetailsScreen() {
         )}
 
         {photos.length > 0 && (
-          <View className="mt-3 bg-white rounded-3xl border border-slate-200 p-5">
-            <View className="flex-row items-center mb-3">
-              <Text className="text-[17px] font-bold text-ink flex-1">Photos</Text>
-              <TouchableOpacity onPress={() => setViewerIndex(0)} activeOpacity={0.7} hitSlop={8}>
-                <Text className="text-sm font-semibold text-primary">See all {photos.length}</Text>
-              </TouchableOpacity>
-            </View>
+          <View className="mt-7">
+            <SectionTitle title="Photos" action={`See all ${photos.length}`} onAction={() => setViewerIndex(0)} />
             <PhotoGrid
               photos={photos}
               size={thumbnailSize}
@@ -200,25 +215,8 @@ export default function SpaceDetailsScreen() {
           </View>
         )}
 
-        <TouchableOpacity
-          onPress={() => router.push({ pathname: '/rank', params: { spaceId: space.id } } as never)}
-          activeOpacity={0.85}
-          className="mt-3 bg-primary rounded-2xl h-[52px] flex-row items-center justify-center"
-        >
-          <Plus size={18} color="white" />
-          <Text className="text-white font-bold text-base ml-2">Rate this spot</Text>
-        </TouchableOpacity>
-        <TouchableOpacity
-          onPress={() => router.push({ pathname: '/event/new', params: { spaceId: space.id } } as never)}
-          activeOpacity={0.85}
-          className="mt-3 bg-white border border-slate-200 rounded-2xl h-[52px] flex-row items-center justify-center"
-        >
-          <CalendarDays size={18} color={colors.primary} />
-          <Text className="text-ink font-bold text-base ml-2">Host an event here</Text>
-        </TouchableOpacity>
-
         {upcoming.length > 0 && (
-          <View className="mt-6">
+          <View className="mt-7">
             <SectionTitle title="Coming up" />
             <View className="gap-3">
               {upcoming.map((event) => (
@@ -233,15 +231,17 @@ export default function SpaceDetailsScreen() {
         )}
 
         {space.attributes && (
-          <View className="mt-3 bg-white rounded-3xl border border-slate-200 p-5">
-            <Text className="text-[17px] font-bold text-ink mb-4">The vibe</Text>
-            <AttributeBars category={space.attributes.category} scores={space.attributes.attribute_scores} columns={1} />
+          <View className="mt-7">
+            <SectionTitle title="The vibe" />
+            <View className="bg-surface rounded-2xl p-4">
+              <AttributeBars category={space.attributes.category} scores={space.attributes.attribute_scores} columns={1} />
+            </View>
           </View>
         )}
 
-        <View className="flex-row items-center mt-6 mb-3">
-          <Text className="text-[17px] font-bold text-ink flex-1">Reviews</Text>
-          <Text className="text-sm text-slate-400">{space.reviews.length}</Text>
+        <View className="flex-row items-baseline mt-7 mb-3">
+          <Text className="text-[18px] font-semibold text-ink flex-1">Reviews</Text>
+          <Text className="text-[15px] text-muted">{space.reviews.length}</Text>
         </View>
         {space.reviews.length === 0 ? (
           <EmptyState

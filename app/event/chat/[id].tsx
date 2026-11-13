@@ -12,14 +12,14 @@ import {
 } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { router, Stack, useLocalSearchParams } from 'expo-router';
-import { Lock, Send } from 'lucide-react-native';
-import { Avatar, EmptyState } from '@/components/ui';
+import { ArrowUp, ChevronRight, Clock, Lock, MessageCircle } from 'lucide-react-native';
+import { Avatar, CategoryIcon, EmptyState } from '@/components/ui';
 import { useAuth } from '@/lib/auth';
 import { canUseEventChat, canUseHereChat, getEvent, listEventMessages, listHereMessages, sendEventMessage, sendHereMessage, subscribeToEventMessages, subscribeToHereMessages } from '@/lib/data';
 import { formatEventWhen, getChatClosesAt, getEventPhase } from '@/lib/events';
 import { getDisplayName } from '@/lib/format';
 import { openEvent, openProfile } from '@/lib/links';
-import { colors } from '@/lib/theme';
+import { useColors, useColorSchemeName } from '@/lib/theme';
 import { MAX_EVENT_MESSAGE_LENGTH, type EventMessage, type SpaceEvent } from '@/types/space';
 
 const firstParam = (value?: string | string[]) => (Array.isArray(value) ? value[0] : value);
@@ -35,6 +35,8 @@ function mergeMessage(messages: EventMessage[], next: EventMessage) {
 }
 
 export default function EventChatScreen() {
+  const colors = useColors();
+  const scheme = useColorSchemeName();
   const params = useLocalSearchParams<{ id: string; token?: string | string[]; date?: string | string[]; kind?: string | string[] }>();
   const eventId = firstParam(params.id) || '';
   const token = firstParam(params.token);
@@ -97,7 +99,7 @@ export default function EventChatScreen() {
 
   if (isLoading) {
     return (
-      <View className="flex-1 bg-slate-50 items-center justify-center">
+      <View className="flex-1 bg-canvas items-center justify-center">
         <ActivityIndicator color={colors.primary} />
       </View>
     );
@@ -106,7 +108,7 @@ export default function EventChatScreen() {
   if (!event || !occurrence || !canChat) {
     const ended = Boolean(event && occurrence && hereChat && getEventPhase(event, occurrence) !== 'live');
     return (
-      <SafeAreaView edges={['bottom']} className="flex-1 bg-slate-50 justify-center px-5">
+      <SafeAreaView edges={['bottom']} className="flex-1 bg-canvas justify-center px-5">
         <EmptyState
           icon={Lock}
           title={ended ? 'This chat is gone' : hereChat ? 'Check in to join' : 'This chat is for people going'}
@@ -125,7 +127,7 @@ export default function EventChatScreen() {
   const closesAt = getChatClosesAt(occurrence).toLocaleDateString(undefined, { weekday: 'long', month: 'short', day: 'numeric' });
 
   return (
-    <SafeAreaView edges={['bottom']} className="flex-1 bg-slate-50">
+    <SafeAreaView edges={['bottom']} className="flex-1 bg-canvas">
       <Stack.Screen options={{ title: event.title }} />
       <KeyboardAvoidingView
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}
@@ -134,16 +136,23 @@ export default function EventChatScreen() {
       >
         <TouchableOpacity
           onPress={() => openEvent(event.id, token, occurrence)}
-          activeOpacity={0.8}
-          className="mx-4 mt-2 mb-1 bg-white rounded-2xl border border-slate-200 px-4 py-3"
+          activeOpacity={0.7}
+          className="mx-4 mt-2 mb-1 bg-surface rounded-2xl px-3.5 py-3 flex-row items-center"
         >
-          <Text className="font-bold text-ink" numberOfLines={1}>{event.space.name}</Text>
-          <Text className="text-[12px] text-slate-500 mt-0.5" numberOfLines={1}>
-            {formatEventWhen({ ...event, kind: 'one_time' }, occurrence)} · {event.going_count} going
-          </Text>
-          <Text className="text-[12px] text-slate-400 mt-1">
-            {hereChat ? 'Only people checked in. This chat deletes when the hangout ends.' : `This chat disappears on ${closesAt}.`}
-          </Text>
+          <CategoryIcon category={event.space.category} size={40} />
+          <View className="flex-1 mx-3">
+            <Text className="text-[15px] font-semibold text-ink" numberOfLines={1}>{event.space.name}</Text>
+            <Text className="text-[13px] text-muted mt-0.5" numberOfLines={1}>
+              {formatEventWhen({ ...event, kind: 'one_time' }, occurrence)} · {event.going_count} going
+            </Text>
+            <View className="flex-row items-center mt-1">
+              <Clock size={12} color={colors.subtle} />
+              <Text className="text-[12px] text-subtle ml-1 flex-1" numberOfLines={2}>
+                {hereChat ? 'Only people checked in. This chat deletes when the hangout ends.' : `This chat disappears on ${closesAt}.`}
+              </Text>
+            </View>
+          </View>
+          <ChevronRight size={18} color={colors.faint} />
         </TouchableOpacity>
 
         <FlatList
@@ -153,8 +162,11 @@ export default function EventChatScreen() {
           contentContainerStyle={{ padding: 16, paddingBottom: 8, flexGrow: 1 }}
           onContentSizeChange={() => listRef.current?.scrollToEnd({ animated: false })}
           ListEmptyComponent={(
-            <View className="flex-1 items-center justify-center py-16">
-              <Text className="text-slate-500 text-center">No messages yet. Say hi and figure out the plan.</Text>
+            <View className="flex-1 items-center justify-center py-16 px-6">
+              <View className="w-12 h-12 rounded-full bg-surface items-center justify-center mb-3">
+                <MessageCircle size={22} color={colors.muted} />
+              </View>
+              <Text className="text-[15px] text-muted text-center leading-5">No messages yet. Say hi and figure out the plan.</Text>
             </View>
           )}
           renderItem={({ item, index }) => {
@@ -170,7 +182,7 @@ export default function EventChatScreen() {
                         onPress={() => openProfile(item.user_id, userId)}
                         accessibilityLabel={`View ${name}'s profile`}
                       >
-                        <Avatar name={name} size={28} />
+                        <Avatar name={name} uri={item.profile?.avatar_url} size={28} />
                       </TouchableOpacity>
                     )}
                   </View>
@@ -178,18 +190,15 @@ export default function EventChatScreen() {
                 <View className="max-w-[75%]">
                   {!mine && !sameAuthorAsPrevious && (
                     <TouchableOpacity onPress={() => openProfile(item.user_id, userId)} accessibilityLabel={`View ${name}'s profile`}>
-                      <Text className="text-[12px] font-semibold text-slate-500 mb-1 ml-1">
+                      <Text className="text-[12px] font-medium text-muted mb-1 ml-3">
                         {item.user_id === event.host_user_id ? `${name} · Host` : name}
                       </Text>
                     </TouchableOpacity>
                   )}
-                  <View
-                    style={{ backgroundColor: mine ? colors.primary : colors.surface }}
-                    className={`rounded-2xl px-3.5 py-2.5 ${mine ? '' : 'border border-slate-200'}`}
-                  >
-                    <Text className={`text-[15px] leading-[20px] ${mine ? 'text-white' : 'text-ink'}`}>{item.body}</Text>
+                  <View className={`rounded-2xl px-3.5 py-2 ${mine ? 'bg-primary' : 'bg-surface'}`}>
+                    <Text className={`text-[15px] leading-[21px] ${mine ? 'text-white' : 'text-ink'}`}>{item.body}</Text>
                   </View>
-                  <Text className={`text-[11px] text-slate-400 mt-1 ${mine ? 'text-right mr-1' : 'ml-1'}`}>
+                  <Text className={`text-[11px] text-subtle mt-1 ${mine ? 'text-right mr-3' : 'ml-3'}`}>
                     {formatMessageTime(item.created_at)}
                   </Text>
                 </View>
@@ -198,26 +207,33 @@ export default function EventChatScreen() {
           }}
         />
 
-        <View className="flex-row items-end px-3 pt-2 pb-3 border-t border-slate-200 bg-white">
-          <TextInput
-            value={draft}
-            onChangeText={setDraft}
-            placeholder={hereChat ? 'Message everyone here' : 'Message the group'}
-            placeholderTextColor={colors.subtle}
-            multiline
-            maxLength={MAX_EVENT_MESSAGE_LENGTH}
-            className="flex-1 min-h-[44px] max-h-[120px] bg-slate-100 rounded-2xl px-4 py-3 text-[15px] text-ink"
-          />
-          <TouchableOpacity
-            onPress={send}
-            disabled={isSending || !draft.trim()}
-            activeOpacity={0.85}
-            accessibilityLabel="Send message"
-            style={{ backgroundColor: draft.trim() ? colors.primary : colors.border }}
-            className="w-11 h-11 rounded-full items-center justify-center ml-2"
-          >
-            {isSending ? <ActivityIndicator color="white" /> : <Send size={18} color="white" />}
-          </TouchableOpacity>
+        <View className="px-3 pt-2 pb-2 bg-surface border-t border-line-soft">
+          <View className="flex-row items-end bg-fill rounded-[22px] pl-4 pr-1.5 py-1.5 min-h-[44px]">
+            <TextInput
+              value={draft}
+              onChangeText={setDraft}
+              placeholder={hereChat ? 'Message everyone here' : 'Message the group'}
+              placeholderTextColor={colors.subtle}
+              keyboardAppearance={scheme}
+              multiline
+              maxLength={MAX_EVENT_MESSAGE_LENGTH}
+              className="flex-1 max-h-[120px] py-1.5 mr-2 text-[15px] text-ink"
+            />
+            <TouchableOpacity
+              onPress={send}
+              disabled={isSending || !draft.trim()}
+              activeOpacity={0.8}
+              accessibilityLabel="Send message"
+              style={{ backgroundColor: draft.trim() ? colors.primary : 'transparent' }}
+              className="w-8 h-8 rounded-full items-center justify-center"
+            >
+              {isSending ? (
+                <ActivityIndicator size="small" color={colors.onPrimary} />
+              ) : (
+                <ArrowUp size={16} color={draft.trim() ? colors.onPrimary : colors.faint} strokeWidth={2.5} />
+              )}
+            </TouchableOpacity>
+          </View>
         </View>
       </KeyboardAvoidingView>
     </SafeAreaView>

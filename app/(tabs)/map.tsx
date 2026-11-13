@@ -16,16 +16,16 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import MapView, { Circle, Marker, type Region } from 'react-native-maps';
 import * as Location from 'expo-location';
 import { router, useFocusEffect, useLocalSearchParams } from 'expo-router';
-import { CalendarDays, CalendarPlus, Clock, Globe, Heart, KeyRound, LocateFixed, Lock, Navigation, Search, Users, X } from 'lucide-react-native';
+import { CalendarDays, Clock, Globe, Heart, KeyRound, LocateFixed, Lock, Navigation, CalendarPlus, Search, UsersRound, X } from 'lucide-react-native';
 import SecretSpotSheet from '@/components/SecretSpotSheet';
-import { Avatar, CategoryIcon, Chip, OpenStatusBadge, ScorePill, SegmentedControl } from '@/components/ui';
+import { Avatar, CategoryIcon, Chip, CloseButton, OpenStatusBadge, ScorePill, SegmentedControl, softShadow } from '@/components/ui';
 import { useAuth } from '@/lib/auth';
 import { listEventsNearby, listRecentActivity, listSecretSpots, listSpaces, toggleFavorite } from '@/lib/data';
 import { upcomingEventsBySpace } from '@/lib/events';
 import { formatDistance, formatTimeAgo, getDisplayName } from '@/lib/format';
 import { openDirections, openEvent, openProfile } from '@/lib/links';
 import { rankSearchResults, type SearchFields } from '@/lib/search';
-import { CATEGORY_META, colors } from '@/lib/theme';
+import { CATEGORY_META, useColors, useColorSchemeName, withAlpha } from '@/lib/theme';
 import {
   SPACE_CATEGORIES,
   type FeedActivity,
@@ -82,6 +82,8 @@ const getItemSearchFields = (item: MapItem): SearchFields => {
 };
 
 export default function MapScreen() {
+  const colors = useColors();
+  const scheme = useColorSchemeName();
   const { userId } = useAuth();
   const params = useLocalSearchParams<{ mode?: string }>();
   const insets = useSafeAreaInsets();
@@ -315,11 +317,12 @@ export default function MapScreen() {
     if (item.kind === 'activity') {
       return (
         <View className="items-center">
-          <View
-            style={{ borderColor: isSelected ? colors.primary : 'white', borderWidth: 3, borderRadius: 999 }}
-            className="shadow-md"
-          >
-            <Avatar name={getDisplayName(item.activity.profile)} size={isSelected ? 40 : 32} />
+          <View style={[softShadow, { borderColor: 'white', borderWidth: 3, borderRadius: 999 }]}>
+            <Avatar
+              name={getDisplayName(item.activity.profile)}
+              uri={item.activity.profile.avatar_url}
+              size={isSelected ? 40 : 32}
+            />
           </View>
           <View style={{ backgroundColor: meta.color }} className="w-4 h-4 rounded-full border-2 border-white -mt-2" />
         </View>
@@ -335,13 +338,13 @@ export default function MapScreen() {
     return (
       <View>
         <View
-          style={{
+          style={[softShadow, {
             width: size,
             height: size,
             borderRadius: size / 2,
             backgroundColor: item.kind === 'secret' ? colors.secret : meta.color,
-          }}
-          className="items-center justify-center border-[3px] border-white shadow-md"
+          }]}
+          className="items-center justify-center border-[3px] border-white"
         >
           <Icon size={isSelected ? 20 : 16} color="white" />
         </View>
@@ -359,7 +362,11 @@ export default function MapScreen() {
 
   const renderCard = ({ item }: { item: MapItem }) => {
     const isSelected = item.id === selectedId;
-    const cardClass = `bg-white rounded-3xl p-4 shadow-lg ${isSelected ? 'border-2 border-primary' : 'border border-slate-200'}`;
+    const cardClass = 'bg-surface rounded-2xl p-4';
+    const cardStyle = [
+      softShadow,
+      { width: cardWidth, height: CARD_HEIGHT, borderWidth: 1.5, borderColor: isSelected ? colors.ink : 'transparent' },
+    ];
 
     if (item.kind === 'space') {
       const { space } = item;
@@ -370,12 +377,12 @@ export default function MapScreen() {
         else if (spaceEvents.length > 1) setEventChoices(spaceEvents);
       };
       return (
-        <TouchableOpacity activeOpacity={0.9} onPress={() => focusItem(item)} style={{ width: cardWidth, height: CARD_HEIGHT }} className={cardClass}>
+        <TouchableOpacity activeOpacity={0.9} onPress={() => focusItem(item)} style={cardStyle} className={cardClass}>
           <View className="flex-row items-center">
             <CategoryIcon category={space.category} size={44} />
             <View className="flex-1 mx-3">
-              <Text className="font-bold text-ink text-base" numberOfLines={1}>{space.name}</Text>
-              <Text className="text-[13px] text-slate-500 mt-0.5" numberOfLines={1}>
+              <Text className="text-[16px] font-semibold text-ink" numberOfLines={1}>{space.name}</Text>
+              <Text className="text-[13px] text-muted mt-0.5" numberOfLines={1}>
                 {[CATEGORY_META[space.category].short, space.primary_purpose, distance].filter(Boolean).join(' · ')}
               </Text>
               <View className="mt-0.5">
@@ -384,36 +391,40 @@ export default function MapScreen() {
             </View>
             {space.attributes && <ScorePill score={space.attributes.overall_score} />}
           </View>
+          {spaceEvents.length === 0 && (space.description || space.address) && (
+            <Text numberOfLines={2} className="text-[13px] leading-[18px] text-body mt-2.5">
+              {space.description || space.address}
+            </Text>
+          )}
           {spaceEvents.length > 0 && (
-            <TouchableOpacity onPress={openEvents} activeOpacity={0.7} className="flex-row items-center mt-2">
-              <CalendarDays size={13} color={colors.primary} />
-              <Text numberOfLines={1} className="text-[13px] font-semibold text-primary ml-1.5 flex-1">
+            <TouchableOpacity onPress={openEvents} activeOpacity={0.7} className="flex-row items-center mt-2.5">
+              <CalendarDays size={14} color={colors.primary} />
+              <Text numberOfLines={1} className="text-[13px] font-medium text-primary ml-1.5 flex-1">
                 {spaceEvents.length === 1 ? spaceEvents[0].title : `${spaceEvents.length} hangouts here`}
               </Text>
             </TouchableOpacity>
           )}
           <View className="flex-row mt-auto gap-2">
-            <TouchableOpacity onPress={() => openDirections(space)} activeOpacity={0.8} className="flex-1 h-10 rounded-xl bg-slate-100 flex-row items-center justify-center">
-              <Navigation size={15} color={colors.ink} />
-              <Text className="font-semibold text-ink ml-1.5">Directions</Text>
+            <TouchableOpacity onPress={() => openDirections(space)} activeOpacity={0.8} className="flex-1 h-10 rounded-xl bg-fill flex-row items-center justify-center">
+              <Navigation size={16} color={colors.ink} />
+              <Text className="text-[14px] font-semibold text-ink ml-1.5">Directions</Text>
             </TouchableOpacity>
             <TouchableOpacity onPress={() => router.push(`/space/${space.id}` as never)} activeOpacity={0.8} className="flex-1 h-10 rounded-xl bg-primary items-center justify-center">
-              <Text className="font-semibold text-white">View spot</Text>
+              <Text className="text-[14px] font-semibold text-on-primary">View spot</Text>
             </TouchableOpacity>
             <TouchableOpacity
               onPress={() => router.push({ pathname: '/event/new', params: { spaceId: space.id } } as never)}
               activeOpacity={0.8}
               accessibilityLabel="Host an event here"
-              style={{ backgroundColor: colors.primarySoft }}
-              className="w-10 h-10 rounded-xl items-center justify-center"
+              className="w-10 h-10 rounded-xl bg-fill items-center justify-center"
             >
-              <CalendarPlus size={18} color={colors.primary} />
+              <CalendarPlus size={18} color={colors.ink} />
             </TouchableOpacity>
             <TouchableOpacity
               onPress={() => handleToggleFavorite(space)}
               activeOpacity={0.8}
               accessibilityLabel={space.current_user_favorited ? 'Remove from saved' : 'Save spot'}
-              className={`w-10 h-10 rounded-xl items-center justify-center ${space.current_user_favorited ? 'bg-rose-50' : 'bg-slate-100'}`}
+              className="w-10 h-10 rounded-xl bg-fill items-center justify-center"
             >
               <Heart
                 size={18}
@@ -430,7 +441,7 @@ export default function MapScreen() {
       const { activity } = item;
       const name = getDisplayName(activity.profile);
       return (
-        <TouchableOpacity activeOpacity={0.9} onPress={() => focusItem(item)} style={{ width: cardWidth, height: CARD_HEIGHT }} className={cardClass}>
+        <TouchableOpacity activeOpacity={0.9} onPress={() => focusItem(item)} style={cardStyle} className={cardClass}>
           <View className="flex-row items-center">
             <TouchableOpacity
               onPress={() => openProfile(activity.user_id, userId)}
@@ -438,17 +449,22 @@ export default function MapScreen() {
               accessibilityLabel={`View ${name}'s profile`}
               className="flex-1 flex-row items-center"
             >
-              <Avatar name={name} size={28} />
-              <Text className="text-[13px] text-slate-500 ml-2 flex-1" numberOfLines={1}>
-                <Text className="font-bold text-ink">{name.split(' ')[0]}</Text> rated · {formatTimeAgo(activity.created_at)}
+              <Avatar name={name} uri={activity.profile.avatar_url} size={28} />
+              <Text className="text-[13px] text-muted ml-2 flex-1" numberOfLines={1}>
+                <Text className="font-semibold text-ink">{name.split(' ')[0]}</Text> rated · {formatTimeAgo(activity.created_at)}
               </Text>
             </TouchableOpacity>
             <ScorePill score={activity.overall_score} size="sm" />
           </View>
-          <TouchableOpacity onPress={() => router.push(`/space/${activity.space.id}` as never)} activeOpacity={0.7}>
-            <Text className="font-bold text-ink text-base mt-2" numberOfLines={1}>{activity.space.name}</Text>
+          <TouchableOpacity
+            onPress={() => router.push(`/space/${activity.space.id}` as never)}
+            activeOpacity={0.7}
+            className="flex-row items-center mt-3"
+          >
+            <CategoryIcon category={activity.space.category} size={36} />
+            <Text className="text-[16px] font-semibold text-ink ml-2.5 flex-1" numberOfLines={1}>{activity.space.name}</Text>
           </TouchableOpacity>
-          <Text className="text-[13px] text-slate-600 mt-1 leading-[18px]" numberOfLines={2}>
+          <Text className="text-[14px] text-body mt-2 leading-5" numberOfLines={2}>
             {activity.review_text || `Went for ${activity.primary_purpose.toLowerCase()}.`}
           </Text>
         </TouchableOpacity>
@@ -459,22 +475,22 @@ export default function MapScreen() {
     const isVisible = spot.access === 'owner' || spot.access === 'unlocked';
     const ownerName = getDisplayName(spot.owner);
     return (
-      <TouchableOpacity activeOpacity={0.9} onPress={() => focusItem(item)} style={{ width: cardWidth, height: CARD_HEIGHT }} className={cardClass}>
+      <TouchableOpacity activeOpacity={0.9} onPress={() => focusItem(item)} style={cardStyle} className={cardClass}>
         <View className="flex-row items-center">
-          <View className="w-11 h-11 rounded-2xl bg-secret items-center justify-center">
-            {isVisible ? <KeyRound size={20} color="white" /> : <Lock size={20} color="white" />}
+          <View className="w-11 h-11 rounded-xl bg-secret/10 items-center justify-center">
+            {isVisible ? <KeyRound size={20} color={colors.secret} /> : <Lock size={20} color={colors.secret} />}
           </View>
           <View className="flex-1 mx-3">
-            <Text className="font-bold text-ink text-base" numberOfLines={1}>
+            <Text className="text-[16px] font-semibold text-ink" numberOfLines={1}>
               {isVisible ? spot.space?.name : `Hidden ${CATEGORY_META[spot.category].short.toLowerCase()} spot`}
             </Text>
             {spot.access === 'owner' ? (
-              <Text className="text-[13px] text-slate-500 mt-0.5" numberOfLines={1}>
+              <Text className="text-[13px] text-muted mt-0.5" numberOfLines={1}>
                 Your secret spot{spot.area_hint ? ` · ${spot.area_hint}` : ''}
               </Text>
             ) : (
               <View className="flex-row items-center mt-0.5">
-                <Text className="text-[13px] text-slate-500">Gatekept by </Text>
+                <Text className="text-[13px] text-muted">Gatekept by </Text>
                 <TouchableOpacity
                   onPress={() => openProfile(spot.owner.user_id, userId)}
                   accessibilityLabel={`View ${ownerName}'s profile`}
@@ -483,7 +499,7 @@ export default function MapScreen() {
                   <Text className="text-[13px] font-semibold text-ink">{ownerName.split(' ')[0]}</Text>
                 </TouchableOpacity>
                 {spot.area_hint ? (
-                  <Text className="text-[13px] text-slate-500 flex-1" numberOfLines={1}>{` · ${spot.area_hint}`}</Text>
+                  <Text className="text-[13px] text-muted flex-1" numberOfLines={1}>{` · ${spot.area_hint}`}</Text>
                 ) : null}
               </View>
             )}
@@ -494,11 +510,11 @@ export default function MapScreen() {
           onPress={() => openSecretSpot(spot)}
           activeOpacity={0.8}
           className={`mt-auto h-10 rounded-xl flex-row items-center justify-center ${
-            spot.access === 'pending' ? 'bg-amber-50' : isVisible ? 'bg-slate-100' : 'bg-secret'
+            spot.access === 'pending' ? 'bg-warning-soft' : isVisible ? 'bg-fill' : 'bg-secret'
           }`}
         >
-          {spot.access === 'pending' && <Clock size={15} color={colors.warning} />}
-          <Text className={`font-semibold ml-1.5 ${spot.access === 'pending' ? 'text-amber-700' : isVisible ? 'text-ink' : 'text-white'}`}>
+          {spot.access === 'pending' && <Clock size={16} color={colors.warning} />}
+          <Text className={`text-[14px] font-semibold ml-1.5 ${spot.access === 'pending' ? 'text-warning' : isVisible ? 'text-ink' : 'text-white'}`}>
             {spot.access === 'pending' ? 'Request pending' : isVisible ? 'View spot' : 'Request or trade to unlock'}
           </Text>
         </TouchableOpacity>
@@ -513,10 +529,11 @@ export default function MapScreen() {
       : { title: 'No spots match', body: 'Try a different category or search.' };
 
   return (
-    <View className="flex-1 bg-white">
+    <View className="flex-1 bg-canvas">
       <MapView
         ref={mapRef}
         style={{ flex: 1 }}
+        userInterfaceStyle={scheme}
         initialRegion={ARLINGTON_COORDS}
         onRegionChangeComplete={(region) => {
           regionRef.current = region;
@@ -538,8 +555,8 @@ export default function MapScreen() {
               key={`area-${item.id}`}
               center={{ latitude: item.latitude, longitude: item.longitude }}
               radius={550}
-              fillColor="rgba(124, 58, 237, 0.12)"
-              strokeColor="rgba(124, 58, 237, 0.4)"
+              fillColor={withAlpha(colors.secret, 0.12)}
+              strokeColor={withAlpha(colors.secret, 0.4)}
               strokeWidth={1}
             />
           ) : null
@@ -561,19 +578,25 @@ export default function MapScreen() {
 
       <View style={{ top: insets.top + 8 }} pointerEvents="box-none" className="absolute left-0 right-0">
         <View className="flex-row items-center px-4">
-          <View className="flex-1 flex-row items-center bg-white rounded-2xl px-4 h-12 shadow-md border border-slate-100">
-            <Search size={18} color={colors.subtle} />
+          <View style={softShadow} className="flex-1 flex-row items-center bg-surface rounded-xl px-4 h-12">
+            <Search size={18} color={colors.muted} />
             <TextInput
               value={query}
               onChangeText={setQuery}
               placeholder={mode === 'following' ? 'Search spots, friends, or vibes' : "Try 'wifi', 'sunset', or a name"}
               placeholderTextColor={colors.subtle}
+              keyboardAppearance={scheme}
               returnKeyType="search"
-              className="flex-1 ml-2 text-[15px] text-ink"
+              className="flex-1 ml-2.5 text-[16px] text-ink"
             />
             {query.length > 0 && (
-              <TouchableOpacity onPress={() => setQuery('')} accessibilityLabel="Clear search">
-                <X size={18} color={colors.subtle} />
+              <TouchableOpacity
+                onPress={() => setQuery('')}
+                accessibilityLabel="Clear search"
+                hitSlop={8}
+                className="w-6 h-6 rounded-full bg-fill items-center justify-center"
+              >
+                <X size={14} color={colors.muted} strokeWidth={2.5} />
               </TouchableOpacity>
             )}
           </View>
@@ -581,19 +604,20 @@ export default function MapScreen() {
             onPress={centerOnUser}
             accessibilityLabel="Center on my location"
             activeOpacity={0.8}
-            className="ml-2 w-12 h-12 bg-white rounded-2xl items-center justify-center shadow-md border border-slate-100"
+            style={softShadow}
+            className="ml-2 w-12 h-12 bg-surface rounded-xl items-center justify-center"
           >
-            <LocateFixed size={20} color={locationPermission === 'granted' ? colors.primary : colors.ink} />
+            <LocateFixed size={20} color={locationPermission === 'granted' ? colors.ink : colors.muted} />
           </TouchableOpacity>
         </View>
 
-        <View className="mx-4 mt-2 bg-white rounded-2xl shadow-md">
+        <View style={softShadow} className="mx-4 mt-2 bg-surface rounded-xl p-1">
           <SegmentedControl
             value={mode}
             onChange={setMode}
             options={[
               { value: 'public', label: 'Public', icon: Globe },
-              { value: 'following', label: 'Following', icon: Users },
+              { value: 'following', label: 'Following', icon: UsersRound },
               { value: 'secret', label: 'Secret', icon: KeyRound },
             ]}
           />
@@ -611,7 +635,7 @@ export default function MapScreen() {
               key={value}
               label={CATEGORY_META[value].short}
               icon={CATEGORY_META[value].icon}
-              color={CATEGORY_META[value].color}
+              iconColor={CATEGORY_META[value].color}
               selected={category === value}
               onPress={() => setCategory(category === value ? 'all' : value)}
               elevated
@@ -620,9 +644,11 @@ export default function MapScreen() {
         </ScrollView>
 
         {mode === 'secret' && (
-          <View className="mx-4 bg-secret rounded-2xl px-4 py-3 flex-row items-center shadow-md">
-            <Lock size={16} color="white" />
-            <Text className="text-white text-[13px] ml-2 flex-1 leading-[18px]">
+          <View style={softShadow} className="mx-4 bg-surface rounded-2xl px-3.5 py-3 flex-row items-center">
+            <View className="w-8 h-8 rounded-lg bg-secret/10 items-center justify-center">
+              <KeyRound size={16} color={colors.secret} />
+            </View>
+            <Text className="text-body text-[13px] ml-3 flex-1 leading-[18px]">
               Secret spots are hidden by their owners. Ask nicely or trade one of yours to get in.
             </Text>
           </View>
@@ -631,13 +657,13 @@ export default function MapScreen() {
 
       <View pointerEvents="box-none" className="absolute left-0 right-0 bottom-4">
         {isLoading ? (
-          <View className="mx-6 bg-white rounded-3xl p-6 items-center shadow-lg">
-            <ActivityIndicator color={colors.primary} />
+          <View style={softShadow} className="mx-6 bg-surface rounded-2xl p-6 items-center">
+            <ActivityIndicator color={colors.muted} />
           </View>
         ) : items.length === 0 ? (
-          <View className="mx-6 bg-white rounded-3xl p-5 shadow-lg border border-slate-200">
-            <Text className="font-bold text-ink text-base">{emptyCopy.title}</Text>
-            <Text className="text-slate-500 text-sm mt-1">{emptyCopy.body}</Text>
+          <View style={softShadow} className="mx-6 bg-surface rounded-2xl p-5">
+            <Text className="text-[16px] font-semibold text-ink">{emptyCopy.title}</Text>
+            <Text className="text-[14px] text-muted mt-1 leading-5">{emptyCopy.body}</Text>
           </View>
         ) : (
           <FlatList
@@ -662,28 +688,32 @@ export default function MapScreen() {
       </View>
 
       {eventChoices && (
-        <View className="absolute left-4 right-4 bottom-4 bg-white rounded-3xl border border-slate-200 p-4 shadow-lg">
-          <View className="flex-row items-center mb-2">
-            <Text className="flex-1 text-[17px] font-bold text-ink">Hangouts here</Text>
-            <TouchableOpacity onPress={() => setEventChoices(null)} accessibilityLabel="Close events">
-              <X size={18} color={colors.muted} />
-            </TouchableOpacity>
+        <View style={softShadow} className="absolute left-4 right-4 bottom-4 bg-surface rounded-2xl pt-4 pb-1">
+          <View className="flex-row items-center px-4 mb-1">
+            <Text className="flex-1 text-[18px] font-semibold text-ink">Hangouts here</Text>
+            <CloseButton onPress={() => setEventChoices(null)} label="Close events" />
           </View>
-          {eventChoices.map((event) => (
-            <TouchableOpacity
-              key={event.id}
-              onPress={() => {
-                setEventChoices(null);
-                openEvent(event.id, undefined, event.occurrence_date);
-              }}
-              className="py-3 border-t border-slate-100"
-            >
-              <Text className="font-bold text-ink" numberOfLines={1}>{event.title}</Text>
-              <Text className="text-[13px] text-slate-500 mt-0.5">
-                {event.occurrence_date || event.event_date}{event.start_time ? ` · ${event.start_time}` : ''} · {event.going_count} going
-                {event.here_count > 0 ? ` · ${event.here_count} here` : ''}
-              </Text>
-            </TouchableOpacity>
+          {eventChoices.map((event, index) => (
+            <View key={event.id}>
+              {index > 0 && <View className="h-px bg-line-soft ml-4" />}
+              <TouchableOpacity
+                onPress={() => {
+                  setEventChoices(null);
+                  openEvent(event.id, undefined, event.occurrence_date);
+                }}
+                activeOpacity={0.6}
+                className="px-4 py-3 flex-row items-center"
+              >
+                <CalendarDays size={18} color={colors.muted} />
+                <View className="flex-1 ml-3">
+                  <Text className="text-[16px] font-semibold text-ink" numberOfLines={1}>{event.title}</Text>
+                  <Text className="text-[13px] text-muted mt-0.5">
+                    {event.occurrence_date || event.event_date}{event.start_time ? ` · ${event.start_time}` : ''} · {event.going_count} going
+                    {event.here_count > 0 ? ` · ${event.here_count} here` : ''}
+                  </Text>
+                </View>
+              </TouchableOpacity>
+            </View>
           ))}
         </View>
       )}

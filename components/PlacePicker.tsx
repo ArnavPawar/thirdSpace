@@ -3,12 +3,12 @@ import { ActivityIndicator, Text, TextInput, TouchableOpacity, View } from 'reac
 import MapView, { Marker } from 'react-native-maps';
 import type { LatLng, MapPressEvent, MarkerDragStartEndEvent, Region } from 'react-native-maps';
 import * as Location from 'expo-location';
-import { Check, Globe, LocateFixed, MapPin, Search, X } from 'lucide-react-native';
+import { Globe, LocateFixed, MapPin, Search, X } from 'lucide-react-native';
 import { CategoryIcon, Chip, ScorePill } from '@/components/ui';
 import { listSpaces } from '@/lib/data';
 import { formatDistance } from '@/lib/format';
 import { buildViewbox, rankSearchResults } from '@/lib/search';
-import { CATEGORY_META, colors } from '@/lib/theme';
+import { useColors, useColorSchemeName } from '@/lib/theme';
 import { calculateDistanceMiles, CATEGORY_CONFIG, type SpaceWithAttributes, type ThirdSpace } from '@/types/space';
 
 interface NominatimSearchResult {
@@ -55,6 +55,8 @@ export default function PlacePicker({
   initialCoordinate?: LatLng | null;
   onPlaceChange: (place: PickedPlace | null) => void;
 }) {
+  const colors = useColors();
+  const scheme = useColorSchemeName();
   const mapRef = useRef<MapView>(null);
   const mapCenterRef = useRef<LatLng>({ latitude: DEFAULT_REGION.latitude, longitude: DEFAULT_REGION.longitude });
   const didApplyPreset = useRef(false);
@@ -222,9 +224,10 @@ export default function PlacePicker({
     };
   }, [searchQuery, searchScope, selected?.space.name, userCoordinate]);
 
+  const selectedName = selected?.space.name;
   const knownMatches = useMemo(() => {
     const query = searchQuery.trim().toLowerCase();
-    if (query.length < 2 || selected?.space.name.toLowerCase() === query) return [];
+    if (query.length < 2 || selectedName?.toLowerCase() === query) return [];
     return rankSearchResults(
       knownSpaces.filter((space) => !space.is_secret),
       query,
@@ -232,7 +235,7 @@ export default function PlacePicker({
       (space) => space,
       userCoordinate || { latitude: DEFAULT_REGION.latitude, longitude: DEFAULT_REGION.longitude }
     ).slice(0, 3);
-  }, [knownSpaces, searchQuery, selected?.space.name, userCoordinate]);
+  }, [knownSpaces, searchQuery, selectedName, userCoordinate]);
 
   const handleSelectSuggestion = (suggestion: PlaceSuggestion) => {
     const coordinate = { latitude: Number(suggestion.lat), longitude: Number(suggestion.lon) };
@@ -251,36 +254,41 @@ export default function PlacePicker({
   return (
     <View>
       {selected && !expanded ? (
-        <View className="bg-white border-2 border-primary rounded-2xl p-4 flex-row items-center">
-          <View className="w-9 h-9 rounded-full bg-primary items-center justify-center">
-            <Check size={18} color="white" />
-          </View>
+        <View className="bg-surface rounded-2xl p-3.5 flex-row items-center">
+          {selected.existing ? (
+            <CategoryIcon category={selected.space.category} size={40} />
+          ) : (
+            <View className="w-10 h-10 rounded-xl bg-fill items-center justify-center">
+              <MapPin size={18} color={colors.ink} />
+            </View>
+          )}
           <View className="flex-1 ml-3">
-            <Text className="font-bold text-ink" numberOfLines={1}>{selected.space.name}</Text>
-            <Text className="text-xs text-slate-500 mt-0.5" numberOfLines={2}>
+            <Text className="text-[16px] font-semibold text-ink" numberOfLines={1}>{selected.space.name}</Text>
+            <Text className="text-[13px] text-muted mt-0.5" numberOfLines={2}>
               {selected.existing ? selected.space.address : 'New place · drop saved with the hangout'}
             </Text>
           </View>
-          <TouchableOpacity onPress={clearPlace} accessibilityLabel="Change place">
-            <Text className="text-primary font-semibold text-sm">Change</Text>
+          <TouchableOpacity onPress={clearPlace} accessibilityLabel="Change place" hitSlop={8} className="ml-2">
+            <Text className="text-primary font-medium text-[15px]">Change</Text>
           </TouchableOpacity>
         </View>
       ) : (
         <>
-          <View className="bg-white border border-slate-200 rounded-2xl px-4 h-[52px] flex-row items-center">
+          <View className="bg-surface rounded-xl px-4 h-12 flex-row items-center">
             <Search size={18} color={colors.subtle} />
             <TextInput
               value={searchQuery}
               onChangeText={setSearchQuery}
               placeholder="Search a cafe, park, court..."
               placeholderTextColor={colors.subtle}
+              keyboardAppearance={scheme}
               autoCapitalize="words"
               autoCorrect={false}
-              className="flex-1 ml-2 text-base text-ink"
+              className="flex-1 ml-2 text-[16px] text-ink"
             />
-            {isSearching && <ActivityIndicator size="small" color={colors.primary} />}
+            {isSearching && <ActivityIndicator size="small" color={colors.muted} />}
             {!isSearching && searchQuery.length > 0 && (
-              <TouchableOpacity onPress={clearPlace} accessibilityLabel="Clear">
+              <TouchableOpacity onPress={clearPlace} accessibilityLabel="Clear" hitSlop={8}>
                 <X size={18} color={colors.subtle} />
               </TouchableOpacity>
             )}
@@ -292,53 +300,60 @@ export default function PlacePicker({
           </View>
 
           {(knownMatches.length > 0 || suggestions.length > 0 || searchError) && (
-            <View className="bg-white border border-slate-200 rounded-2xl mt-2 overflow-hidden">
+            <View className="bg-surface rounded-2xl mt-3 overflow-hidden">
               {knownMatches.length > 0 && (
-                <Text className="px-4 pt-3 pb-1 text-[11px] font-bold text-slate-400 uppercase tracking-wider">On Third Space</Text>
+                <Text className="px-4 pt-3 pb-1 text-[13px] font-medium text-muted">On Third Space</Text>
               )}
-              {knownMatches.map((space) => (
-                <TouchableOpacity key={space.id} onPress={() => selectExisting(space)} className="px-4 py-3 flex-row items-center border-b border-slate-100" activeOpacity={0.7}>
-                  <CategoryIcon category={space.category} size={32} />
-                  <View className="flex-1 ml-3">
-                    <Text className="font-semibold text-ink" numberOfLines={1}>{space.name}</Text>
-                    <Text className="text-xs text-slate-500" numberOfLines={1}>{space.address}</Text>
-                  </View>
-                  {space.attributes && <ScorePill score={space.attributes.overall_score} size="sm" />}
-                </TouchableOpacity>
+              {knownMatches.map((space, index) => (
+                <View key={space.id}>
+                  {index > 0 && <View className="h-px bg-line-soft ml-[60px]" />}
+                  <TouchableOpacity onPress={() => selectExisting(space)} className="px-4 py-2.5 flex-row items-center" activeOpacity={0.6}>
+                    <CategoryIcon category={space.category} size={32} />
+                    <View className="flex-1 ml-3">
+                      <Text className="text-[15px] font-semibold text-ink" numberOfLines={1}>{space.name}</Text>
+                      <Text className="text-[13px] text-muted mt-0.5" numberOfLines={1}>{space.address}</Text>
+                    </View>
+                    {space.attributes && <ScorePill score={space.attributes.overall_score} size="sm" />}
+                  </TouchableOpacity>
+                </View>
               ))}
               {suggestions.length > 0 && (
-                <Text className="px-4 pt-3 pb-1 text-[11px] font-bold text-slate-400 uppercase tracking-wider">New place</Text>
+                <Text className={`px-4 pb-1 text-[13px] font-medium text-muted ${knownMatches.length > 0 ? 'pt-4' : 'pt-3'}`}>New place</Text>
               )}
-              {searchError && <Text className="p-4 text-sm text-rose-600">{searchError}</Text>}
+              {searchError && <Text className="p-4 text-[14px] text-danger">{searchError}</Text>}
               {suggestions.map((suggestion, index) => (
-                <TouchableOpacity
-                  key={suggestion.place_id}
-                  onPress={() => handleSelectSuggestion(suggestion)}
-                  className={`px-4 py-3 flex-row items-center ${index < suggestions.length - 1 ? 'border-b border-slate-100' : ''}`}
-                  activeOpacity={0.7}
-                >
-                  <View className="w-8 h-8 rounded-lg bg-slate-100 items-center justify-center">
-                    <MapPin size={16} color={colors.muted} />
-                  </View>
-                  <View className="flex-1 ml-3">
-                    <Text className="font-semibold text-ink" numberOfLines={1}>{suggestion.name || suggestion.display_name.split(',')[0]}</Text>
-                    <Text className="text-xs text-slate-500" numberOfLines={1}>{suggestion.display_name}</Text>
-                  </View>
-                  <Text className="text-xs font-semibold text-slate-400 ml-2">{formatDistance(suggestion.distance)}</Text>
-                </TouchableOpacity>
+                <View key={suggestion.place_id}>
+                  {index > 0 && <View className="h-px bg-line-soft ml-[60px]" />}
+                  <TouchableOpacity
+                    onPress={() => handleSelectSuggestion(suggestion)}
+                    className="px-4 py-2.5 flex-row items-center"
+                    activeOpacity={0.6}
+                  >
+                    <View className="w-8 h-8 rounded-lg bg-fill items-center justify-center">
+                      <MapPin size={16} color={colors.muted} />
+                    </View>
+                    <View className="flex-1 ml-3">
+                      <Text className="text-[15px] font-semibold text-ink" numberOfLines={1}>{suggestion.name || suggestion.display_name.split(',')[0]}</Text>
+                      <Text className="text-[13px] text-muted mt-0.5" numberOfLines={1}>{suggestion.display_name}</Text>
+                    </View>
+                    <Text className="text-[13px] text-subtle ml-2">{formatDistance(suggestion.distance)}</Text>
+                  </TouchableOpacity>
+                </View>
               ))}
+              <View className="h-1.5" />
             </View>
           )}
 
           <View className="flex-row items-center my-4">
-            <View className="flex-1 h-px bg-slate-200" />
-            <Text className="mx-3 text-xs font-semibold text-slate-400">OR DROP A PIN</Text>
-            <View className="flex-1 h-px bg-slate-200" />
+            <View className="flex-1 h-px bg-line" />
+            <Text className="mx-3 text-[13px] font-medium text-muted">Or drop a pin</Text>
+            <View className="flex-1 h-px bg-line" />
           </View>
 
-          <View className="rounded-3xl overflow-hidden border border-slate-200 bg-white">
+          <View className="rounded-2xl overflow-hidden bg-surface">
             <MapView
               ref={mapRef}
+              userInterfaceStyle={scheme}
               style={{ height: 220 }}
               initialRegion={initialCoordinate ? { ...initialCoordinate, latitudeDelta: 0.012, longitudeDelta: 0.008 } : DEFAULT_REGION}
               onPress={(event: MapPressEvent) => {
@@ -365,7 +380,7 @@ export default function PlacePicker({
             </MapView>
             <View className="px-4 py-3 flex-row items-center">
               <MapPin size={14} color={colors.subtle} />
-              <Text className="text-[13px] text-slate-500 ml-1.5 flex-1">
+              <Text className="text-[13px] text-muted ml-1.5 flex-1">
                 {isReverseGeocoding ? 'Finding the address...' : 'Tap the map to drop a pin. Drag it to fine-tune.'}
               </Text>
             </View>

@@ -50,7 +50,7 @@ export default function PhotoViewer({ photos, initialIndex, onClose, onOpenRevie
 
         <SafeAreaView edges={['top', 'bottom']} pointerEvents="box-none" className="absolute inset-0 justify-between">
           <View className="flex-row items-center justify-between px-4 pt-2" pointerEvents="box-none">
-            <Text className="text-white/80 font-semibold">
+            <Text className="text-white/80 text-[15px] font-medium">
               {photos.length > 0 ? `${index + 1} of ${photos.length}` : ''}
             </Text>
             <TouchableOpacity
@@ -67,7 +67,7 @@ export default function PhotoViewer({ photos, initialIndex, onClose, onOpenRevie
             <View className="mx-4 mb-3 bg-black/60 rounded-2xl px-4 py-3 flex-row items-center">
               <View className="flex-1">
                 <Text
-                  className="text-white font-semibold"
+                  className="text-white text-[15px] font-semibold"
                   onPress={() => {
                     onClose();
                     openProfile(current.user_id, userId);
@@ -75,7 +75,7 @@ export default function PhotoViewer({ photos, initialIndex, onClose, onOpenRevie
                 >
                   {getDisplayName(current.profile)}
                 </Text>
-                <Text className="text-white/60 text-xs mt-0.5">
+                <Text className="text-white/60 text-[13px] mt-0.5">
                   {current.comment_id ? 'In a comment' : 'In a review'} · {formatTimeAgo(current.created_at)}
                 </Text>
               </View>
@@ -83,9 +83,9 @@ export default function PhotoViewer({ photos, initialIndex, onClose, onOpenRevie
                 <TouchableOpacity
                   onPress={() => onOpenReview(current.rating_id!)}
                   activeOpacity={0.7}
-                  className="px-3 h-9 rounded-full bg-white items-center justify-center"
+                  className="px-3.5 h-9 rounded-full bg-white items-center justify-center"
                 >
-                  <Text className="text-ink font-semibold text-sm">See review</Text>
+                  <Text className="text-[14px] font-semibold text-[#141413]">See review</Text>
                 </TouchableOpacity>
               )}
             </View>
