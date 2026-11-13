@@ -1,17 +1,17 @@
 import React, { useState } from 'react';
 import { Alert, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { router } from 'expo-router';
-import { Heart, ImagePlus, KeyRound, MessageCircle, Send, UserCheck, UserPlus } from 'lucide-react-native';
+import { ArrowUp, Heart, ImagePlus, KeyRound, MessageCircle, X } from 'lucide-react-native';
 import AttributeBars from '@/components/AttributeBars';
 import PhotoGrid from '@/components/PhotoGrid';
 import { PhotoThumbnails, pickPhotos } from '@/components/PhotoPickerRow';
 import PhotoViewer from '@/components/PhotoViewer';
-import { Avatar, CategoryIcon, ScorePill, VibeTitleChip } from '@/components/ui';
+import { Avatar, CategoryIcon, PillButton, ScorePill, VibeTitleChip } from '@/components/ui';
 import { useAuth } from '@/lib/auth';
 import { addComment, listComments, removeReviewCompanion, toggleLike } from '@/lib/data';
 import { formatTimeAgo, getDisplayName } from '@/lib/format';
 import { openGroup, openProfile } from '@/lib/links';
-import { CATEGORY_META, colors } from '@/lib/theme';
+import { CATEGORY_META, useColors, useColorSchemeName } from '@/lib/theme';
 import { MAX_PHOTOS_PER_POST, type FeedActivity, type LocalPhoto, type ReviewComment, type ReviewPhoto } from '@/types/space';
 
 interface FeedCardProps {
@@ -22,6 +22,8 @@ interface FeedCardProps {
 }
 
 export default function FeedCard({ item, onToggleFollow, showSpace = true, linkAuthor = true }: FeedCardProps) {
+  const colors = useColors();
+  const scheme = useColorSchemeName();
   const { userId } = useAuth();
   const [liked, setLiked] = useState(Boolean(item.current_user_liked));
   const [likes, setLikes] = useState(item.likes_count || 0);
@@ -99,63 +101,61 @@ export default function FeedCard({ item, onToggleFollow, showSpace = true, linkA
     }
   };
 
+  const canSend = Boolean(draft.trim()) && !isPosting;
+
   return (
-    <View className="bg-white rounded-3xl border border-slate-200 overflow-hidden">
+    <View className="bg-surface rounded-2xl overflow-hidden">
       <View className="px-4 pt-4 flex-row items-center">
         <TouchableOpacity
           onPress={() => openProfile(item.user_id, userId)}
           disabled={!linkAuthor}
-          activeOpacity={0.7}
+          activeOpacity={0.6}
           accessibilityLabel={linkAuthor ? `View ${name}'s profile` : undefined}
           className="flex-1 flex-row items-center"
         >
-          <Avatar name={name} size={40} />
+          <Avatar name={name} uri={item.profile.avatar_url} size={40} />
           <View className="flex-1 ml-3">
             <View className="flex-row items-center flex-wrap">
-              <Text className="font-bold text-ink text-[15px] mr-2">{isOwnReview ? 'You' : name}</Text>
+              <Text className="font-semibold text-ink text-[15px] mr-2">{isOwnReview ? 'You' : name}</Text>
               <VibeTitleChip title={item.profile.vibe_title} />
             </View>
-            <Text className="text-xs text-slate-400 mt-0.5">
+            <Text className="text-[13px] text-muted mt-0.5" numberOfLines={1}>
               {formatTimeAgo(item.created_at)} · for {item.primary_purpose}
             </Text>
           </View>
         </TouchableOpacity>
 
         {!isOwnReview && onToggleFollow && (
-          <TouchableOpacity
+          <PillButton
+            label={item.is_following ? 'Following' : 'Follow'}
+            active={item.is_following}
             onPress={() => onToggleFollow(item.user_id)}
-            activeOpacity={0.7}
-            className={`flex-row items-center px-3 h-8 rounded-full ${item.is_following ? 'bg-slate-100' : 'bg-primary'}`}
-          >
-            {item.is_following
-              ? <UserCheck size={14} color={colors.muted} />
-              : <UserPlus size={14} color="white" />}
-            <Text className={`font-semibold text-xs ml-1 ${item.is_following ? 'text-slate-600' : 'text-white'}`}>
-              {item.is_following ? 'Following' : 'Follow'}
-            </Text>
-          </TouchableOpacity>
+          />
         )}
       </View>
 
       {(companions.length > 0 || groups.length > 0) && (
         <View className="px-4 mt-2 flex-row flex-wrap items-center">
-          <Text className="text-xs text-slate-500 mr-1">with</Text>
+          <Text className="text-[13px] text-muted mr-1">with</Text>
           {companions.map((profile, index) => {
             const companionName = getDisplayName(profile);
             const mine = profile.user_id === userId;
             return (
               <View key={profile.user_id} className="flex-row items-center">
-                {index > 0 && <Text className="text-xs text-slate-400 mr-1">,</Text>}
                 <TouchableOpacity onPress={() => openProfile(profile.user_id, userId)} disabled={!linkAuthor}>
-                  <Text className="text-xs font-semibold text-ink">{companionName}</Text>
+                  <Text className="text-[13px] font-semibold text-ink">
+                    {companionName}
+                    {index < companions.length - 1 ? <Text className="font-normal text-muted">, </Text> : null}
+                  </Text>
                 </TouchableOpacity>
                 {mine && (
                   <TouchableOpacity
                     onPress={() => removeCompanion(profile.user_id)}
                     accessibilityLabel="Remove yourself from this review"
+                    hitSlop={8}
                     className="ml-1"
                   >
-                    <Text className="text-xs text-slate-400">×</Text>
+                    <X size={12} color={colors.subtle} />
                   </TouchableOpacity>
                 )}
               </View>
@@ -163,9 +163,9 @@ export default function FeedCard({ item, onToggleFollow, showSpace = true, linkA
           })}
           {groups.map((group, index) => (
             <View key={group.id} className="flex-row items-center">
-              {(companions.length > 0 || index > 0) && <Text className="text-xs text-slate-400 mx-1">·</Text>}
+              {(companions.length > 0 || index > 0) && <Text className="text-[13px] text-muted mx-1">·</Text>}
               <TouchableOpacity onPress={() => openGroup(group.id)}>
-                <Text className="text-xs font-semibold text-primary">{group.name}</Text>
+                <Text className="text-[13px] font-semibold text-primary">{group.name}</Text>
               </TouchableOpacity>
             </View>
           ))}
@@ -175,21 +175,20 @@ export default function FeedCard({ item, onToggleFollow, showSpace = true, linkA
       {showSpace && (
         <TouchableOpacity
           onPress={() => router.push(`/space/${item.space.id}` as never)}
-          activeOpacity={0.75}
-          className="mx-4 mt-3 p-3 rounded-2xl flex-row items-center"
-          style={{ backgroundColor: CATEGORY_META[item.space.category].tint + '80' }}
+          activeOpacity={0.7}
+          className="mx-4 mt-3 p-2.5 rounded-xl bg-fill flex-row items-center"
         >
-          <CategoryIcon category={item.space.category} size={40} />
+          <CategoryIcon category={item.space.category} size={38} />
           <View className="flex-1 mx-3">
             <View className="flex-row items-center">
-              <Text className="font-bold text-ink text-[15px] flex-shrink" numberOfLines={1}>{item.space.name}</Text>
+              <Text className="font-semibold text-ink text-[15px] flex-shrink" numberOfLines={1}>{item.space.name}</Text>
               {item.space.is_secret && (
                 <View className="ml-1.5">
                   <KeyRound size={13} color={colors.secret} />
                 </View>
               )}
             </View>
-            <Text className="text-xs text-slate-500 mt-0.5" numberOfLines={1}>
+            <Text className="text-[13px] text-muted mt-0.5" numberOfLines={1}>
               {CATEGORY_META[item.space.category].short} · {item.space.address.split(',').slice(0, 2).join(',')}
             </Text>
           </View>
@@ -204,7 +203,7 @@ export default function FeedCard({ item, onToggleFollow, showSpace = true, linkA
       )}
 
       {item.review_text && (
-        <Text className="px-4 mt-3 text-[15px] text-slate-700 leading-[22px]">{item.review_text}</Text>
+        <Text className="px-4 mt-3 text-[15px] text-ink leading-[22px]">{item.review_text}</Text>
       )}
 
       {item.photos && item.photos.length > 0 && (
@@ -213,33 +212,47 @@ export default function FeedCard({ item, onToggleFollow, showSpace = true, linkA
         </View>
       )}
 
-      <View className="px-4 mt-3">
+      <View className="px-4 mt-3.5">
         <AttributeBars category={item.category} scores={item.attribute_scores} />
       </View>
 
-      <View className="px-2 py-1 border-t border-slate-100 flex-row items-center">
-        <TouchableOpacity onPress={handleLike} activeOpacity={0.7} className="flex-row items-center px-2 h-10">
-          <Heart size={18} color={liked ? colors.like : colors.subtle} fill={liked ? colors.like : 'transparent'} />
-          <Text className={`text-sm ml-1.5 font-medium ${liked ? 'text-rose-600' : 'text-slate-500'}`}>{likes}</Text>
+      <View className="px-2 pb-1 flex-row items-center">
+        <TouchableOpacity
+          onPress={handleLike}
+          activeOpacity={0.6}
+          accessibilityRole="button"
+          accessibilityLabel={liked ? 'Unlike' : 'Like'}
+          accessibilityState={{ selected: liked }}
+          className="flex-row items-center px-2 h-10"
+        >
+          <Heart size={20} color={liked ? colors.like : colors.muted} fill={liked ? colors.like : 'transparent'} />
+          <Text style={{ color: liked ? colors.like : colors.muted }} className="text-[14px] ml-1.5 font-medium">{likes}</Text>
         </TouchableOpacity>
-        <TouchableOpacity onPress={handleToggleComments} activeOpacity={0.7} className="flex-row items-center px-2 h-10 ml-2">
-          <MessageCircle size={18} color={isCommentsOpen ? colors.primary : colors.subtle} />
-          <Text className="text-sm ml-1.5 font-medium text-slate-500">{commentCount}</Text>
+        <TouchableOpacity
+          onPress={handleToggleComments}
+          activeOpacity={0.6}
+          accessibilityRole="button"
+          accessibilityLabel={isCommentsOpen ? 'Hide comments' : 'Show comments'}
+          className="flex-row items-center px-2 h-10 ml-1"
+        >
+          <MessageCircle size={20} color={isCommentsOpen ? colors.ink : colors.muted} />
+          <Text className={`text-[14px] ml-1.5 font-medium ${isCommentsOpen ? 'text-ink' : 'text-muted'}`}>{commentCount}</Text>
         </TouchableOpacity>
       </View>
 
       {isCommentsOpen && (
-        <View className="px-4 pb-4">
+        <View className="px-4 pb-4 pt-1 border-t border-line-soft">
+          <View className="h-2" />
           {(comments || []).map((comment) => (
             <View key={comment.id} className="flex-row mb-2.5">
-              <TouchableOpacity onPress={() => openProfile(comment.user_id, userId)} activeOpacity={0.7}>
-                <Avatar name={getDisplayName(comment.profile)} size={28} />
+              <TouchableOpacity onPress={() => openProfile(comment.user_id, userId)} activeOpacity={0.6}>
+                <Avatar name={getDisplayName(comment.profile)} uri={comment.profile?.avatar_url} size={28} />
               </TouchableOpacity>
-              <View className="flex-1 ml-2 bg-slate-50 rounded-2xl px-3 py-2">
-                <Text onPress={() => openProfile(comment.user_id, userId)} className="text-xs font-bold text-slate-700 self-start">
+              <View className="flex-1 ml-2 bg-fill rounded-2xl px-3 py-2">
+                <Text onPress={() => openProfile(comment.user_id, userId)} className="text-[13px] font-semibold text-ink self-start">
                   {getDisplayName(comment.profile)}
                 </Text>
-                <Text className="text-sm text-slate-700 mt-0.5">{comment.body}</Text>
+                <Text className="text-[14px] text-body mt-0.5 leading-5">{comment.body}</Text>
                 {comment.photos && comment.photos.length > 0 && (
                   <View className="mt-2">
                     <PhotoGrid
@@ -253,7 +266,7 @@ export default function FeedCard({ item, onToggleFollow, showSpace = true, linkA
             </View>
           ))}
           {comments?.length === 0 && (
-            <Text className="text-sm text-slate-400 mb-3">No comments yet. Start the conversation.</Text>
+            <Text className="text-[14px] text-muted mb-3">No comments yet. Start the conversation.</Text>
           )}
           {draftPhotos.length > 0 && (
             <View className="flex-row gap-2 mb-2">
@@ -265,13 +278,13 @@ export default function FeedCard({ item, onToggleFollow, showSpace = true, linkA
               />
             </View>
           )}
-          <View className="flex-row items-center">
+          <View className="flex-row items-center bg-fill rounded-full pl-1 pr-1 h-10">
             {draftPhotos.length < MAX_PHOTOS_PER_POST && (
               <TouchableOpacity
                 onPress={handleAddCommentPhotos}
                 disabled={isPosting}
                 accessibilityLabel="Add photos to comment"
-                className="mr-2 w-10 h-10 rounded-full bg-slate-100 items-center justify-center"
+                className="w-8 h-8 rounded-full items-center justify-center"
               >
                 <ImagePlus size={18} color={colors.muted} />
               </TouchableOpacity>
@@ -281,16 +294,19 @@ export default function FeedCard({ item, onToggleFollow, showSpace = true, linkA
               onChangeText={setDraft}
               placeholder="Add a comment..."
               placeholderTextColor={colors.subtle}
+              keyboardAppearance={scheme}
               returnKeyType="send"
               onSubmitEditing={handleAddComment}
-              className="flex-1 bg-slate-100 rounded-full px-4 h-10 text-sm text-ink"
+              className="flex-1 px-2 h-10 text-[14px] text-ink"
             />
             <TouchableOpacity
               onPress={handleAddComment}
-              disabled={!draft.trim() || isPosting}
-              className={`ml-2 w-10 h-10 rounded-full items-center justify-center ${draft.trim() && !isPosting ? 'bg-primary' : 'bg-slate-200'}`}
+              disabled={!canSend}
+              accessibilityLabel="Post comment"
+              style={{ backgroundColor: canSend ? colors.primary : 'transparent' }}
+              className="w-8 h-8 rounded-full items-center justify-center"
             >
-              <Send size={16} color="white" />
+              <ArrowUp size={16} color={canSend ? colors.onPrimary : colors.faint} strokeWidth={2.5} />
             </TouchableOpacity>
           </View>
         </View>

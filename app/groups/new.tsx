@@ -1,13 +1,12 @@
 import React, { useState } from 'react';
-import { Alert, KeyboardAvoidingView, Platform, ScrollView, Text, TextInput, View } from 'react-native';
+import { Alert, KeyboardAvoidingView, Platform, ScrollView, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
 import { Globe, Lock } from 'lucide-react-native';
-import { PrimaryButton, SegmentedControl } from '@/components/ui';
+import { PrimaryButton, SegmentedControl, TextField } from '@/components/ui';
 import { useAuth } from '@/lib/auth';
 import { createGroup } from '@/lib/data';
 import { requireSignedIn } from '@/lib/links';
-import { colors } from '@/lib/theme';
 import type { GroupVisibility } from '@/types/space';
 
 export default function NewGroupScreen() {
@@ -35,31 +34,27 @@ export default function NewGroupScreen() {
   };
 
   return (
-    <SafeAreaView edges={['bottom']} className="flex-1 bg-slate-50">
+    <SafeAreaView edges={['bottom']} className="flex-1 bg-canvas">
       <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} className="flex-1">
-        <ScrollView contentContainerStyle={{ padding: 20, paddingBottom: 40 }} keyboardShouldPersistTaps="handled">
-          <Text className="text-[13px] font-bold text-slate-400 uppercase tracking-wider mb-2">Name</Text>
-          <TextInput
+        <ScrollView contentContainerStyle={{ padding: 16, paddingTop: 8, paddingBottom: 40 }} keyboardShouldPersistTaps="handled">
+          <TextField
+            label="Name"
             value={name}
             onChangeText={setName}
             placeholder="Company hangout, Arlington girls..."
-            placeholderTextColor={colors.subtle}
             maxLength={60}
-            className="bg-white border border-slate-200 rounded-2xl px-4 h-[52px] text-base text-ink"
           />
 
-          <Text className="text-[13px] font-bold text-slate-400 uppercase tracking-wider mt-6 mb-2">What is this for?</Text>
-          <TextInput
+          <TextField
+            label="What is this for?"
             value={description}
             onChangeText={setDescription}
             placeholder="Friday hangs, or what's happening around Arlington"
-            placeholderTextColor={colors.subtle}
             multiline
             maxLength={280}
-            className="bg-white border border-slate-200 rounded-2xl px-4 py-3 min-h-[96px] text-base text-ink"
           />
 
-          <Text className="text-[13px] font-bold text-slate-400 uppercase tracking-wider mt-6 mb-2">Who can join</Text>
+          <Text className="text-[13px] font-medium text-muted mb-1.5 ml-1 mt-2">Who can join</Text>
           <SegmentedControl
             value={visibility}
             onChange={setVisibility}
@@ -68,13 +63,13 @@ export default function NewGroupScreen() {
               { value: 'public', label: 'Public', icon: Globe },
             ]}
           />
-          <Text className="text-[13px] text-slate-500 mt-2">
+          <Text className="text-[13px] text-muted mt-2 ml-1 leading-[18px]">
             {visibility === 'private'
               ? 'Hidden from search. People join with your link or an invite from a member.'
               : 'Anyone can find this group and join. Use the description to say who it is for.'}
           </Text>
 
-          <View className="mt-6">
+          <View className="mt-8">
             <PrimaryButton label="Create group" onPress={publish} loading={isSubmitting} disabled={!name.trim()} />
           </View>
         </ScrollView>

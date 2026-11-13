@@ -12,13 +12,13 @@ import {
 } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Stack, useLocalSearchParams } from 'expo-router';
-import { Send } from 'lucide-react-native';
+import { ArrowUp } from 'lucide-react-native';
 import { Avatar } from '@/components/ui';
 import { useAuth } from '@/lib/auth';
 import { getPublicProfile, listDirectMessages, sendDirectMessage } from '@/lib/data';
 import { getDisplayName } from '@/lib/format';
 import { openProfile } from '@/lib/links';
-import { colors } from '@/lib/theme';
+import { useColors, useColorSchemeName } from '@/lib/theme';
 import { MAX_EVENT_MESSAGE_LENGTH, type DirectMessage, type Profile } from '@/types/space';
 
 const firstParam = (value?: string | string[]) => (Array.isArray(value) ? value[0] : value);
@@ -27,6 +27,8 @@ const formatMessageTime = (iso: string) =>
   new Date(iso).toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' });
 
 export default function DirectMessageScreen() {
+  const colors = useColors();
+  const scheme = useColorSchemeName();
   const params = useLocalSearchParams<{ id: string }>();
   const otherUserId = firstParam(params.id) || '';
   const insets = useSafeAreaInsets();
@@ -71,42 +73,44 @@ export default function DirectMessageScreen() {
   };
 
   const name = getDisplayName(person || undefined);
+  const canSend = Boolean(draft.trim());
 
   if (isLoading) {
     return (
-      <View className="flex-1 bg-slate-50 items-center justify-center">
-        <ActivityIndicator color={colors.primary} />
+      <View className="flex-1 bg-canvas items-center justify-center">
+        <ActivityIndicator color={colors.muted} />
       </View>
     );
   }
 
   return (
-    <SafeAreaView edges={['bottom']} className="flex-1 bg-slate-50">
+    <SafeAreaView edges={['bottom']} className="flex-1 bg-canvas">
       <Stack.Screen options={{ title: name }} />
       <KeyboardAvoidingView
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}
         keyboardVerticalOffset={Platform.OS === 'ios' ? insets.top + HEADER_HEIGHT : 0}
         className="flex-1"
       >
-        <TouchableOpacity
-          onPress={() => openProfile(otherUserId, userId)}
-          className="mx-4 mt-2 mb-1 bg-white rounded-2xl border border-slate-200 px-4 py-3 flex-row items-center"
-        >
-          <Avatar name={name} size={36} />
-          <View className="ml-3 flex-1">
-            <Text className="font-bold text-ink">{name}</Text>
-            <Text className="text-[12px] text-slate-500">Private message. Only the two of you can see this.</Text>
-          </View>
-        </TouchableOpacity>
         <FlatList
           ref={listRef}
           data={messages}
           keyExtractor={(message) => message.id}
-          contentContainerStyle={{ padding: 16, paddingBottom: 8, flexGrow: 1 }}
+          contentContainerStyle={{ paddingHorizontal: 16, paddingTop: 8, paddingBottom: 8, flexGrow: 1 }}
           onContentSizeChange={() => listRef.current?.scrollToEnd({ animated: false })}
+          ListHeaderComponent={(
+            <TouchableOpacity
+              onPress={() => openProfile(otherUserId, userId)}
+              activeOpacity={0.6}
+              className="items-center pt-4 pb-5"
+            >
+              <Avatar name={name} uri={person?.avatar_url} size={64} />
+              <Text className="text-[17px] font-semibold text-ink mt-2.5">{name}</Text>
+              <Text className="text-[13px] text-muted mt-0.5 text-center">Private message. Only the two of you can see this.</Text>
+            </TouchableOpacity>
+          )}
           ListEmptyComponent={(
             <View className="flex-1 items-center justify-center py-16">
-              <Text className="text-slate-500 text-center">No messages yet.</Text>
+              <Text className="text-[15px] text-muted text-center">No messages yet.</Text>
             </View>
           )}
           renderItem={({ item }) => {
@@ -114,13 +118,10 @@ export default function DirectMessageScreen() {
             return (
               <View className={`flex-row ${mine ? 'justify-end' : 'justify-start'} mt-2`}>
                 <View className="max-w-[75%]">
-                  <View
-                    style={{ backgroundColor: mine ? colors.primary : colors.surface }}
-                    className={`rounded-2xl px-3.5 py-2.5 ${mine ? '' : 'border border-slate-200'}`}
-                  >
-                    <Text className={`text-[15px] leading-[20px] ${mine ? 'text-white' : 'text-ink'}`}>{item.body}</Text>
+                  <View className={`rounded-2xl px-3.5 py-2.5 ${mine ? 'bg-primary' : 'bg-surface'}`}>
+                    <Text className={`text-[16px] leading-[21px] ${mine ? 'text-white' : 'text-ink'}`}>{item.body}</Text>
                   </View>
-                  <Text className={`text-[11px] text-slate-400 mt-1 ${mine ? 'text-right' : ''}`}>
+                  <Text className={`text-[11px] text-subtle mt-1 px-1 ${mine ? 'text-right' : ''}`}>
                     {formatMessageTime(item.created_at)}
                   </Text>
                 </View>
@@ -128,25 +129,32 @@ export default function DirectMessageScreen() {
             );
           }}
         />
-        <View className="flex-row items-end px-3 pt-2 pb-3 border-t border-slate-200 bg-white">
-          <TextInput
-            value={draft}
-            onChangeText={setDraft}
-            placeholder={`Message ${name}`}
-            placeholderTextColor={colors.subtle}
-            multiline
-            maxLength={MAX_EVENT_MESSAGE_LENGTH}
-            className="flex-1 min-h-[44px] max-h-[120px] bg-slate-100 rounded-2xl px-4 py-3 text-[15px] text-ink"
-          />
-          <TouchableOpacity
-            onPress={send}
-            disabled={isSending || !draft.trim()}
-            accessibilityLabel="Send message"
-            style={{ backgroundColor: draft.trim() ? colors.primary : colors.border }}
-            className="w-11 h-11 rounded-full items-center justify-center ml-2"
-          >
-            {isSending ? <ActivityIndicator color="white" /> : <Send size={18} color="white" />}
-          </TouchableOpacity>
+        <View className="px-3 pt-2 pb-2 bg-canvas">
+          <View className="flex-row items-end bg-surface rounded-[22px] pl-4 pr-1 py-1 min-h-[44px]">
+            <TextInput
+              value={draft}
+              onChangeText={setDraft}
+              placeholder={`Message ${name}`}
+              placeholderTextColor={colors.subtle}
+              keyboardAppearance={scheme}
+              multiline
+              maxLength={MAX_EVENT_MESSAGE_LENGTH}
+              className="flex-1 max-h-[120px] pt-2 pb-2 mr-1 text-[16px] leading-5 text-ink"
+            />
+            <TouchableOpacity
+              onPress={send}
+              disabled={isSending || !canSend}
+              accessibilityLabel="Send message"
+              style={{ backgroundColor: canSend ? colors.primary : colors.fill }}
+              className="w-9 h-9 rounded-full items-center justify-center"
+            >
+              {isSending ? (
+                <ActivityIndicator size="small" color={colors.onPrimary} />
+              ) : (
+                <ArrowUp size={18} color={canSend ? colors.onPrimary : colors.subtle} strokeWidth={2.5} />
+              )}
+            </TouchableOpacity>
+          </View>
         </View>
       </KeyboardAvoidingView>
     </SafeAreaView>

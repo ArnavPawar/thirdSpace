@@ -6,11 +6,13 @@ import * as Linking from 'expo-linking';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { PrimaryButton } from '@/components/ui';
 import { preparePasswordReset, useAuth } from '@/lib/auth';
-import { colors } from '@/lib/theme';
+import { useColors, useColorSchemeName } from '@/lib/theme';
 
 type ResetStatus = 'working' | 'ready' | 'needs-link';
 
 export default function ResetPasswordScreen() {
+  const colors = useColors();
+  const scheme = useColorSchemeName();
   const linkedUrl = useURL();
   const { updatePassword } = useAuth();
   const [status, setStatus] = useState<ResetStatus>('working');
@@ -65,44 +67,49 @@ export default function ResetPasswordScreen() {
   };
 
   return (
-    <SafeAreaView edges={['bottom']} className="flex-1 bg-slate-50">
+    <SafeAreaView edges={['bottom']} className="flex-1 bg-canvas">
       <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} className="flex-1">
         {status === 'working' ? (
           <View className="flex-1 items-center justify-center">
-            <ActivityIndicator color={colors.primary} />
+            <ActivityIndicator color={colors.muted} />
           </View>
         ) : (
           <ScrollView contentContainerStyle={{ flexGrow: 1, justifyContent: 'center', padding: 20 }} keyboardShouldPersistTaps="handled">
             {status === 'needs-link' ? (
               <>
-                <Text className="text-[32px] font-extrabold text-ink tracking-tight">Check your email</Text>
-                <Text className="text-[15px] text-slate-500 mt-2 mb-8 leading-5">{message}</Text>
+                <Text className="text-[26px] font-bold text-ink tracking-tight">Check your email</Text>
+                <Text className="text-[15px] text-muted mt-1.5 mb-8 leading-[22px]">{message}</Text>
                 <PrimaryButton label="Back to sign in" onPress={() => router.replace('/auth' as never)} />
               </>
             ) : (
               <>
-                <Text className="text-[32px] font-extrabold text-ink tracking-tight">Choose a new password</Text>
-                <Text className="text-[15px] text-slate-500 mt-2 mb-8 leading-5">
+                <Text className="text-[26px] font-bold text-ink tracking-tight">Choose a new password</Text>
+                <Text className="text-[15px] text-muted mt-1.5 mb-8 leading-[22px]">
                   {email ? `This updates the password for ${email}.` : 'This updates the password for the account on this phone.'}
                 </Text>
-                <TextInput
-                  value={password}
-                  onChangeText={setPassword}
-                  placeholder="New password (6+ characters)"
-                  placeholderTextColor={colors.subtle}
-                  secureTextEntry
-                  autoComplete="new-password"
-                  className="bg-white border border-slate-200 rounded-2xl px-4 h-[52px] mb-3 text-base text-ink"
-                />
-                <TextInput
-                  value={confirmPassword}
-                  onChangeText={setConfirmPassword}
-                  placeholder="Confirm new password"
-                  placeholderTextColor={colors.subtle}
-                  secureTextEntry
-                  autoComplete="new-password"
-                  className="bg-white border border-slate-200 rounded-2xl px-4 h-[52px] mb-5 text-base text-ink"
-                />
+                <View className="bg-surface rounded-xl overflow-hidden mb-5">
+                  <TextInput
+                    value={password}
+                    onChangeText={setPassword}
+                    placeholder="New password (6+ characters)"
+                    placeholderTextColor={colors.subtle}
+                    keyboardAppearance={scheme}
+                    secureTextEntry
+                    autoComplete="new-password"
+                    className="h-12 px-4 text-[16px] text-ink"
+                  />
+                  <View className="h-px bg-line-soft ml-4" />
+                  <TextInput
+                    value={confirmPassword}
+                    onChangeText={setConfirmPassword}
+                    placeholder="Confirm new password"
+                    placeholderTextColor={colors.subtle}
+                    keyboardAppearance={scheme}
+                    secureTextEntry
+                    autoComplete="new-password"
+                    className="h-12 px-4 text-[16px] text-ink"
+                  />
+                </View>
                 <PrimaryButton label="Update password" onPress={savePassword} loading={saving} disabled={saving} />
               </>
             )}

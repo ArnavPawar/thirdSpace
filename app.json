@@ -5,10 +5,13 @@
     "scheme": "thirdspace",
     "version": "1.0.0",
     "orientation": "portrait",
-    "userInterfaceStyle": "light",
+    "userInterfaceStyle": "automatic",
     "splash": {
       "resizeMode": "contain",
-      "backgroundColor": "#ffffff"
+      "backgroundColor": "#f3f3f1",
+      "dark": {
+        "backgroundColor": "#0b0b0b"
+      }
     },
     "assetBundlePatterns": [
       "**/*"

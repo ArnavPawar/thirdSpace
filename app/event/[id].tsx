@@ -3,7 +3,6 @@ import { ActivityIndicator, Alert, ScrollView, Text, TouchableOpacity, View } fr
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router, useFocusEffect, useLocalSearchParams } from 'expo-router';
 import {
-  ArrowRight,
   CalendarDays,
   Check,
   ChevronRight,
@@ -11,18 +10,19 @@ import {
   ExternalLink,
   History,
   Lock,
-  MapPin,
   MapPinCheck,
   MessageCircle,
-  MessageSquareQuote,
+  Plus,
   Share2,
-  Users,
+  UserPlus,
+  UsersRound,
+  type LucideIcon,
 } from 'lucide-react-native';
 import { EventPoster, ThemePicker } from '@/components/EventPoster';
 import GoingFaces from '@/components/GoingFaces';
 import InviteSheet from '@/components/InviteSheet';
 import PeopleListSheet from '@/components/PeopleListSheet';
-import { Avatar, CategoryIcon, EmptyState } from '@/components/ui';
+import { Avatar, CategoryIcon, EmptyState, PrimaryButton } from '@/components/ui';
 import { useAuth } from '@/lib/auth';
 import {
   cancelHostedEvent,
@@ -48,7 +48,7 @@ import {
 } from '@/lib/events';
 import { formatTimeAgo, getDisplayName } from '@/lib/format';
 import { copyInviteLink, eventHref, eventShareUrl, openDirectMessage, openEventChat, openExternalUrl, openHereChat, openProfile, requireSignedIn, shareEvent } from '@/lib/links';
-import { CATEGORY_META, colors } from '@/lib/theme';
+import { CATEGORY_META, useColors } from '@/lib/theme';
 import type { EventMention, EventTheme, InviteStatus, Profile, RsvpStatus, SpaceEvent } from '@/types/space';
 
 const firstParam = (value?: string | string[]) => (Array.isArray(value) ? value[0] : value);
@@ -80,10 +80,25 @@ function viewerRecapLine(event: SpaceEvent, isHost: boolean) {
 
 function RecapStat({ value, label }: { value: number; label: string }) {
   return (
-    <View className="flex-1 bg-slate-50 rounded-2xl px-4 py-3">
-      <Text className="text-[24px] font-extrabold text-ink">{value}</Text>
-      <Text className="text-[13px] text-slate-500">{label}</Text>
+    <View className="flex-1 bg-fill rounded-xl px-4 py-3">
+      <Text className="text-[22px] font-bold text-ink tracking-tight">{value}</Text>
+      <Text className="text-[13px] text-muted mt-0.5">{label}</Text>
     </View>
+  );
+}
+
+function ShareAction({ icon: Icon, label, onPress }: { icon: LucideIcon; label: string; onPress: () => void }) {
+  const colors = useColors();
+  return (
+    <TouchableOpacity
+      onPress={onPress}
+      activeOpacity={0.6}
+      accessibilityRole="button"
+      className="flex-1 h-[60px] rounded-2xl bg-surface items-center justify-center"
+    >
+      <Icon size={18} color={colors.ink} />
+      <Text className="text-[13px] font-medium text-ink mt-1">{label}</Text>
+    </TouchableOpacity>
   );
 }
 
@@ -101,6 +116,7 @@ function EventRecap({
   onOpenDate: (date: string) => void;
   onOpenPeople: () => void;
 }) {
+  const colors = useColors();
   const occurrence = event.occurrence_date || event.event_date;
   const when = occurrence ? formatEventWhen({ ...event, kind: 'one_time' }, occurrence) : undefined;
   const next = occurrence ? nextOccurrenceAfter(event, occurrence) : undefined;
@@ -108,25 +124,25 @@ function EventRecap({
   const crowd = event.here.length > 0 ? event.here : event.going;
 
   return (
-    <View className="bg-white rounded-3xl border border-slate-200 p-5 mt-3">
+    <View className="bg-surface rounded-2xl p-4 mt-3">
       <View className="flex-row items-center">
-        <View className="w-10 h-10 rounded-2xl bg-slate-100 items-center justify-center">
+        <View className="w-10 h-10 rounded-full bg-fill items-center justify-center">
           <History size={20} color={colors.muted} />
         </View>
         <View className="flex-1 ml-3">
-          <Text className="text-[17px] font-bold text-ink">This one has ended</Text>
-          {when && <Text className="text-[13px] text-slate-500 mt-0.5">It happened {when}.</Text>}
+          <Text className="text-[17px] font-semibold text-ink">This one has ended</Text>
+          {when && <Text className="text-[13px] text-muted mt-0.5">It happened {when}.</Text>}
         </View>
       </View>
 
       {viewerLine && (
         <View
           className={`self-start flex-row items-center rounded-full px-3 py-1.5 mt-4 ${
-            viewerLine.tone === 'success' ? 'bg-emerald-50' : 'bg-slate-100'
+            viewerLine.tone === 'success' ? 'bg-success-soft' : 'bg-fill'
           }`}
         >
           {viewerLine.tone === 'success' && <Check size={14} color={colors.success} />}
-          <Text className={`text-[13px] font-semibold ml-1 ${viewerLine.tone === 'success' ? 'text-emerald-700' : 'text-slate-600'}`}>
+          <Text className={`text-[13px] font-medium ${viewerLine.tone === 'success' ? 'text-success ml-1' : 'text-body'}`}>
             {viewerLine.text}
           </Text>
         </View>
@@ -146,49 +162,40 @@ function EventRecap({
           className="mt-4"
         >
           <View className="flex-row items-center mb-2">
-            <Text className="text-[12px] font-semibold text-slate-400 uppercase flex-1">
+            <Text className="text-[13px] font-medium text-muted flex-1">
               {event.here.length > 0 ? 'Who showed up' : 'Who was going'}
             </Text>
-            <ChevronRight size={16} color={colors.subtle} />
+            <ChevronRight size={16} color={colors.faint} />
           </View>
           <GoingFaces people={crowd} currentUserId={userId} size={32} />
         </TouchableOpacity>
       )}
 
-      <Text className="text-[13px] text-slate-500 mt-4 leading-[18px]">
+      <Text className="text-[13px] text-muted mt-4 leading-[18px]">
         RSVPs and check-ins close once an event wraps up.
       </Text>
 
-      {next ? (
-        <TouchableOpacity
-          onPress={() => onOpenDate(next)}
-          activeOpacity={0.85}
-          className="h-[52px] rounded-2xl bg-primary flex-row items-center justify-center mt-4"
-        >
-          <Text className="font-bold text-base text-white">
-            RSVP for {parseDateKey(next).toLocaleDateString(undefined, { weekday: 'long', month: 'short', day: 'numeric' })}
-          </Text>
-          <ArrowRight size={18} color="white" style={{ marginLeft: 6 }} />
-        </TouchableOpacity>
-      ) : isHost ? (
-        <TouchableOpacity
-          onPress={() => router.push({ pathname: '/event/new', params: { spaceId: event.space.id } } as never)}
-          activeOpacity={0.85}
-          className="h-[52px] rounded-2xl bg-primary flex-row items-center justify-center mt-4"
-        >
-          <CalendarDays size={18} color="white" />
-          <Text className="font-bold text-base text-white ml-2">Host another one here</Text>
-        </TouchableOpacity>
-      ) : (
-        <TouchableOpacity
-          onPress={() => router.push('/calendar' as never)}
-          activeOpacity={0.85}
-          className="h-[52px] rounded-2xl bg-white border border-slate-200 flex-row items-center justify-center mt-4"
-        >
-          <CalendarDays size={18} color={colors.primary} />
-          <Text className="font-bold text-base text-ink ml-2">See what&apos;s coming up</Text>
-        </TouchableOpacity>
-      )}
+      <View className="mt-4">
+        {next ? (
+          <PrimaryButton
+            label={`RSVP for ${parseDateKey(next).toLocaleDateString(undefined, { weekday: 'long', month: 'short', day: 'numeric' })}`}
+            onPress={() => onOpenDate(next)}
+          />
+        ) : isHost ? (
+          <PrimaryButton
+            label="Host another one here"
+            icon={Plus}
+            onPress={() => router.push({ pathname: '/event/new', params: { spaceId: event.space.id } } as never)}
+          />
+        ) : (
+          <PrimaryButton
+            label="See what's coming up"
+            icon={CalendarDays}
+            tone="neutral"
+            onPress={() => router.push('/calendar' as never)}
+          />
+        )}
+      </View>
     </View>
   );
 }
@@ -196,16 +203,16 @@ function EventRecap({
 const MENTIONS_PREVIEW = 3;
 
 function EventMentions({ mentions, spaceName, userId }: { mentions: EventMention[]; spaceName: string; userId: string }) {
+  const colors = useColors();
   const [expanded, setExpanded] = useState(false);
   const visible = expanded ? mentions : mentions.slice(0, MENTIONS_PREVIEW);
   const hidden = mentions.length - visible.length;
 
   return (
-    <View className="bg-white rounded-3xl border border-slate-200 p-5 mt-3">
+    <View className="bg-surface rounded-2xl px-4 pt-4 mt-3">
       <View className="flex-row items-center mb-1">
-        <MessageSquareQuote size={18} color={colors.primary} />
-        <Text className="text-[17px] font-bold text-ink ml-2 flex-1">What people are saying</Text>
-        <Text className="text-[13px] font-semibold text-slate-400">{mentions.length} mentions</Text>
+        <Text className="text-[18px] font-semibold text-ink flex-1">What people are saying</Text>
+        <Text className="text-[13px] text-muted">{mentions.length} mentions</Text>
       </View>
 
       {visible.map((mention, index) => {
@@ -213,45 +220,54 @@ function EventMentions({ mentions, spaceName, userId }: { mentions: EventMention
         const name = fromPlace ? spaceName : getDisplayName(mention.profile);
         const authorId = mention.profile?.user_id;
         return (
-          <View key={mention.id} className={`py-3 ${index > 0 ? 'border-t border-slate-100' : ''}`}>
-            <TouchableOpacity
-              disabled={!authorId}
-              onPress={() => authorId && openProfile(authorId, userId)}
-              activeOpacity={0.7}
-              className="flex-row items-center"
-            >
-              <Avatar name={name} size={28} />
-              <View className="flex-1 ml-2.5">
-                <Text className="text-[14px] font-bold text-ink" numberOfLines={1}>
-                  {fromPlace ? 'From the place description' : name}
-                </Text>
-                <Text className="text-[12px] text-slate-400">
-                  {formatTimeAgo(mention.source_created_at)}
-                  {` · says ${formatEventWhen(mention)}`}
-                </Text>
-              </View>
-            </TouchableOpacity>
-            <Text className="text-[15px] text-slate-600 italic leading-[22px] mt-2">“{mention.snippet}”</Text>
-            {mention.link_url && (
-              <TouchableOpacity onPress={() => openExternalUrl(mention.link_url)} className="flex-row items-center mt-1.5" activeOpacity={0.7}>
-                <ExternalLink size={12} color={colors.primary} />
-                <Text className="text-[13px] font-semibold text-primary ml-1">{linkLabel(mention.link_url)}</Text>
+          <View key={mention.id}>
+            {index > 0 && <View className="h-px bg-line-soft" />}
+            <View className="py-3">
+              <TouchableOpacity
+                disabled={!authorId}
+                onPress={() => authorId && openProfile(authorId, userId)}
+                activeOpacity={0.6}
+                className="flex-row items-center"
+              >
+                <Avatar name={name} uri={mention.profile?.avatar_url} size={32} />
+                <View className="flex-1 ml-2.5">
+                  <Text className="text-[15px] font-semibold text-ink" numberOfLines={1}>
+                    {fromPlace ? 'From the place description' : name}
+                  </Text>
+                  <Text className="text-[13px] text-muted">
+                    {formatTimeAgo(mention.source_created_at)}
+                    {` · says ${formatEventWhen(mention)}`}
+                  </Text>
+                </View>
               </TouchableOpacity>
-            )}
+              <Text className="text-[15px] text-body leading-[22px] mt-2">“{mention.snippet}”</Text>
+              {mention.link_url && (
+                <TouchableOpacity onPress={() => openExternalUrl(mention.link_url)} className="flex-row items-center self-start mt-1.5" activeOpacity={0.6}>
+                  <ExternalLink size={13} color={colors.primary} />
+                  <Text className="text-[13px] font-medium text-primary ml-1">{linkLabel(mention.link_url)}</Text>
+                </TouchableOpacity>
+              )}
+            </View>
           </View>
         );
       })}
 
-      {mentions.length > MENTIONS_PREVIEW && (
-        <TouchableOpacity onPress={() => setExpanded((value) => !value)} className="pt-2 items-center" activeOpacity={0.7}>
-          <Text className="text-primary font-semibold">{expanded ? 'Show fewer' : `Show ${hidden} more`}</Text>
-        </TouchableOpacity>
+      {mentions.length > MENTIONS_PREVIEW ? (
+        <>
+          <View className="h-px bg-line-soft" />
+          <TouchableOpacity onPress={() => setExpanded((value) => !value)} className="py-3 items-center" activeOpacity={0.6}>
+            <Text className="text-[15px] text-primary font-medium">{expanded ? 'Show fewer' : `Show ${hidden} more`}</Text>
+          </TouchableOpacity>
+        </>
+      ) : (
+        <View className="h-1" />
       )}
     </View>
   );
 }
 
 export default function EventDetailScreen() {
+  const colors = useColors();
   const params = useLocalSearchParams<{ id: string; token?: string | string[]; date?: string | string[]; invite?: string | string[] }>();
   const eventId = firstParam(params.id) || '';
   const token = firstParam(params.token);
@@ -335,7 +351,7 @@ export default function EventDetailScreen() {
     ]);
   };
 
-  const openInvites = async () => {
+  const openInvites = useCallback(async () => {
     if (!event) return;
     setShowInvite(true);
     setInviteLoading(true);
@@ -351,7 +367,7 @@ export default function EventDetailScreen() {
     } finally {
       setInviteLoading(false);
     }
-  };
+  }, [event, userId]);
 
   const invitePerson = async (inviteeId: string) => {
     if (!event) return;
@@ -373,19 +389,19 @@ export default function EventDetailScreen() {
     openedInvite.current = true;
     router.setParams({ invite: '' });
     openInvites();
-  }, [event, inviteParam, userId]);
+  }, [event, inviteParam, openInvites, userId]);
 
   if (isLoading) {
     return (
-      <View className="flex-1 bg-slate-50 items-center justify-center">
-        <ActivityIndicator color={colors.primary} />
+      <View className="flex-1 bg-canvas items-center justify-center">
+        <ActivityIndicator color={colors.muted} />
       </View>
     );
   }
 
   if (!event) {
     return (
-      <SafeAreaView edges={['bottom']} className="flex-1 bg-slate-50 justify-center px-5">
+      <SafeAreaView edges={['bottom']} className="flex-1 bg-canvas justify-center px-5">
         <EmptyState
           icon={Lock}
           title="This hangout is not available"
@@ -421,70 +437,86 @@ export default function EventDetailScreen() {
   const showMentions = !hosted && mentions.length > 1;
 
   return (
-    <SafeAreaView edges={['bottom']} className="flex-1 bg-slate-50">
+    <SafeAreaView edges={['bottom']} className="flex-1 bg-canvas">
       <ScrollView contentContainerStyle={{ padding: 16, paddingBottom: 32 }}>
-        <View className="bg-white rounded-3xl border border-slate-200 overflow-hidden">
-          {hosted ? (
-            <View className="p-2 pb-0">
-              <EventPoster
-                title={event.title}
-                when={formatEventWhen(event)}
-                place={event.space.name}
-                visibility={event.visibility}
-                theme={event.theme}
-                cancelled={Boolean(event.cancelled_at)}
-                ended={ended}
-              />
-            </View>
-          ) : (
-            <View style={{ backgroundColor: meta.tint }} className="px-5 pt-5 pb-4">
+        {hosted && (
+          <EventPoster
+            title={event.title}
+            when={formatEventWhen(event)}
+            place={event.space.name}
+            visibility={event.visibility}
+            theme={event.theme}
+            cancelled={Boolean(event.cancelled_at)}
+            ended={ended}
+          />
+        )}
+
+        <View className={`bg-surface rounded-2xl overflow-hidden ${hosted ? 'mt-3' : ''}`}>
+          {!hosted && (
+            <View style={{ backgroundColor: meta.tint }} className="px-5 pt-5 pb-5">
               <View className="flex-row items-center">
                 <View style={{ backgroundColor: meta.color }} className="rounded-full px-2.5 py-1">
-                  <Text className="text-white text-[11px] font-bold uppercase">Mentioned</Text>
+                  <Text className="text-white text-[12px] font-semibold">Mentioned</Text>
                 </View>
                 {ended && (
-                  <View className="rounded-full px-2.5 py-1 ml-2 bg-slate-700">
-                    <Text className="text-white text-[11px] font-bold uppercase">Ended</Text>
+                  <View className="rounded-full px-2.5 py-1 ml-2 bg-surface">
+                    <Text className="text-muted text-[12px] font-semibold">Ended</Text>
                   </View>
                 )}
               </View>
-              <Text className="text-[28px] font-extrabold text-ink mt-3">{event.title}</Text>
-              <Text className="text-slate-600 mt-1">{formatEventWhen(event)}</Text>
+              <Text className="text-[26px] font-bold tracking-tight text-ink mt-3">{event.title}</Text>
+              <View className="flex-row items-center mt-1.5">
+                <CalendarDays size={14} color={colors.muted} />
+                <Text className="text-[15px] text-body ml-1.5 flex-1">{formatEventWhen(event)}</Text>
+              </View>
             </View>
           )}
 
-          <View className="px-5 py-4 gap-3">
-            <TouchableOpacity onPress={() => router.push(`/space/${event.space.id}` as never)} className="flex-row items-center" activeOpacity={0.7}>
-              <CategoryIcon category={event.space.category} size={40} />
-              <View className="flex-1 ml-3">
-                <Text className="font-bold text-ink" numberOfLines={1}>{event.space.name}</Text>
-                <Text className="text-[13px] text-slate-500" numberOfLines={2}>{event.space.address}</Text>
-              </View>
-              <MapPin size={16} color={colors.subtle} />
-            </TouchableOpacity>
+          <TouchableOpacity onPress={() => router.push(`/space/${event.space.id}` as never)} className="flex-row items-center px-4 py-3" activeOpacity={0.6}>
+            <CategoryIcon category={event.space.category} size={40} />
+            <View className="flex-1 ml-3">
+              <Text className="text-[16px] font-semibold text-ink" numberOfLines={1}>{event.space.name}</Text>
+              <Text className="text-[13px] text-muted mt-0.5" numberOfLines={2}>{event.space.address}</Text>
+            </View>
+            <ChevronRight size={18} color={colors.faint} />
+          </TouchableOpacity>
 
-            {hostId && (
-              <TouchableOpacity onPress={() => openProfile(hostId, userId)} className="flex-row items-center" activeOpacity={0.7}>
-                <Text className="text-slate-500">{hosted ? 'Hosted by' : 'Mentioned by'}</Text>
-                <Text className="font-bold text-ink ml-1">{hostName}</Text>
-                {!hosted && mentionCount > 1 && (
-                  <Text className="text-slate-500"> and {mentionCount - 1} {mentionCount === 2 ? 'other' : 'others'}</Text>
-                )}
+          {hostId && (
+            <>
+              <View className="h-px bg-line-soft ml-4" />
+              <TouchableOpacity onPress={() => openProfile(hostId, userId)} className="flex-row items-center px-4 py-3" activeOpacity={0.6}>
+                <Avatar name={hostName} uri={event.profile?.avatar_url} size={40} />
+                <View className="flex-1 ml-3">
+                  <Text className="text-[13px] text-muted">{hosted ? 'Hosted by' : 'Mentioned by'}</Text>
+                  <Text className="text-[16px] font-semibold text-ink mt-0.5" numberOfLines={1}>
+                    {hostName}
+                    {!hosted && mentionCount > 1 && (
+                      <Text className="font-normal text-muted"> and {mentionCount - 1} {mentionCount === 2 ? 'other' : 'others'}</Text>
+                    )}
+                  </Text>
+                </View>
+                <ChevronRight size={18} color={colors.faint} />
               </TouchableOpacity>
-            )}
+            </>
+          )}
 
-            {hosted && event.description && (
-              <Text className="text-[15px] text-slate-700 leading-[22px]">{event.description}</Text>
-            )}
-            {!hosted && !showMentions && (
-              <Text className="text-[15px] text-slate-600 italic leading-[22px]">“{event.snippet}”</Text>
-            )}
-          </View>
+          {hosted && event.description && (
+            <>
+              <View className="h-px bg-line-soft ml-4" />
+              <Text className="px-4 py-3.5 text-[15px] text-body leading-[22px]">{event.description}</Text>
+            </>
+          )}
+          {!hosted && !showMentions && (
+            <>
+              <View className="h-px bg-line-soft ml-4" />
+              <Text className="px-4 py-3.5 text-[15px] text-body leading-[22px]">“{event.snippet}”</Text>
+            </>
+          )}
         </View>
 
         {isHost && !event.cancelled_at && !ended && (
-          <View className="bg-white rounded-3xl border border-slate-200 p-5 mt-3">
-            <Text className="text-[15px] font-bold text-ink mb-3">Look</Text>
+          <View className="bg-surface rounded-2xl p-4 mt-3">
+            <Text className="text-[16px] font-semibold text-ink mb-3">Look</Text>
             <ThemePicker
               value={event.theme}
               onChange={async (next: EventTheme) => {
@@ -502,41 +534,43 @@ export default function EventDetailScreen() {
         )}
 
         {!event.cancelled_at && phase === 'live' && (
-          <View style={{ borderColor: colors.success }} className="bg-white rounded-3xl border p-5 mt-3">
+          <View className="bg-surface rounded-2xl p-4 mt-3">
             <TouchableOpacity
               onPress={() => event.here.length > 0 && setShowHere(true)}
               disabled={event.here.length === 0}
-              activeOpacity={0.7}
+              activeOpacity={0.6}
               accessibilityRole="button"
               accessibilityLabel={`See who is here, ${event.here_count} here now`}
               className="flex-row items-center"
             >
-              <View className="flex-row items-center bg-emerald-50 rounded-full px-2.5 py-1 mr-2">
-                <View style={{ backgroundColor: colors.success }} className="w-2 h-2 rounded-full" />
-                <Text className="text-[11px] font-bold text-emerald-700 uppercase ml-1.5">Live</Text>
+              <View className="flex-row items-center bg-success-soft rounded-full px-2.5 py-1 mr-2">
+                <View style={{ backgroundColor: colors.success }} className="w-1.5 h-1.5 rounded-full" />
+                <Text className="text-[12px] font-semibold text-success ml-1.5">Live</Text>
               </View>
-              <Text className="text-[17px] font-bold text-ink flex-1">{event.here_count} here now</Text>
-              {event.here.length > 0 && <ChevronRight size={18} color={colors.subtle} />}
+              <Text className="text-[17px] font-semibold text-ink flex-1">{event.here_count} here now</Text>
+              {event.here.length > 0 && <ChevronRight size={18} color={colors.faint} />}
             </TouchableOpacity>
             {event.here.length > 0 ? (
               <View className="mt-3">
                 <GoingFaces people={event.here} currentUserId={userId} size={36} />
               </View>
             ) : (
-              <Text className="text-slate-500 mt-2">No one has checked in yet.</Text>
+              <Text className="text-[15px] text-muted mt-2">No one has checked in yet.</Text>
             )}
             <TouchableOpacity
               onPress={toggleHere}
               disabled={isSaving}
-              activeOpacity={0.85}
-              style={{ backgroundColor: event.viewer_here ? colors.success : colors.ink }}
-              className="h-[52px] rounded-2xl flex-row items-center justify-center mt-4"
+              activeOpacity={0.8}
+              style={{ backgroundColor: event.viewer_here ? colors.successSoft : colors.ink }}
+              className="h-[50px] rounded-xl flex-row items-center justify-center mt-4"
               accessibilityState={{ selected: event.viewer_here }}
             >
-              {event.viewer_here ? <Check size={18} color="white" /> : <MapPinCheck size={18} color="white" />}
-              <Text className="font-bold text-base text-white ml-1.5">{event.viewer_here ? "You're here" : "I'm here"}</Text>
+              {event.viewer_here ? <Check size={18} color={colors.success} /> : <MapPinCheck size={18} color={colors.canvas} />}
+              <Text style={{ color: event.viewer_here ? colors.success : colors.canvas }} className="font-semibold text-[16px] ml-2">
+                {event.viewer_here ? "You're here" : "I'm here"}
+              </Text>
             </TouchableOpacity>
-            <Text className="text-[12px] text-slate-400 text-center mt-2">
+            <Text className="text-[13px] text-muted text-center mt-2">
               {event.viewer_here ? 'Tap again if you checked in by mistake.' : 'Let people know you made it.'}
             </Text>
           </View>
@@ -556,58 +590,63 @@ export default function EventDetailScreen() {
         )}
 
         {!event.cancelled_at && !ended && (
-          <View className="bg-white rounded-3xl border border-slate-200 p-5 mt-3">
+          <View className="bg-surface rounded-2xl p-4 mt-3">
             <TouchableOpacity
               onPress={() => event.going.length > 0 && setShowGoing(true)}
               disabled={event.going.length === 0}
-              activeOpacity={0.7}
+              activeOpacity={0.6}
               accessibilityRole="button"
               accessibilityLabel={`See who is going, ${headcount}`}
               className="flex-row items-center"
             >
-              <Users size={16} color={colors.primary} />
-              <Text className="text-[17px] font-bold text-ink ml-2 flex-1">{headcount}</Text>
-              {event.going.length > 0 && <ChevronRight size={18} color={colors.subtle} />}
+              <UsersRound size={18} color={colors.muted} />
+              <Text className="text-[17px] font-semibold text-ink ml-2 flex-1">{headcount}</Text>
+              {event.going.length > 0 && <ChevronRight size={18} color={colors.faint} />}
             </TouchableOpacity>
             {event.kind === 'weekly' && event.occurrence_date && (
-              <Text className="text-[13px] text-slate-500 mt-1">For {formatEventWhen({ ...event, kind: 'one_time' }, event.occurrence_date)}</Text>
+              <Text className="text-[13px] text-muted mt-1">For {formatEventWhen({ ...event, kind: 'one_time' }, event.occurrence_date)}</Text>
             )}
-            {capNote && <Text className={`text-[13px] mt-1 ${atCap ? 'text-amber-700' : 'text-slate-500'}`}>{capNote}</Text>}
+            {capNote && <Text className={`text-[13px] mt-1 ${atCap ? 'text-warning' : 'text-muted'}`}>{capNote}</Text>}
             {event.going.length > 0 ? (
               <View className="mt-3">
                 <GoingFaces people={event.going} currentUserId={userId} size={36} />
               </View>
             ) : (
-              <Text className="text-slate-500 mt-2">No one has RSVPed yet. Be the first.</Text>
+              <Text className="text-[15px] text-muted mt-2">No one has RSVPed yet. Be the first.</Text>
             )}
             <View className="flex-row gap-2 mt-4">
               <TouchableOpacity
                 onPress={() => rsvp('going')}
                 disabled={isSaving || isFull}
-                activeOpacity={0.85}
-                style={{ backgroundColor: event.viewer_rsvp === 'going' ? colors.success : isFull ? colors.border : colors.primary }}
-                className="flex-1 h-[52px] rounded-2xl flex-row items-center justify-center"
+                activeOpacity={0.8}
+                style={{
+                  backgroundColor: event.viewer_rsvp === 'going' ? colors.primarySoft : isFull ? colors.fill : colors.primary,
+                }}
+                className="flex-1 h-[50px] rounded-xl flex-row items-center justify-center"
               >
-                {event.viewer_rsvp === 'going' && <Check size={18} color="white" />}
-                <Text className={`font-bold text-base ml-1.5 ${isFull ? 'text-slate-400' : 'text-white'}`}>
+                {event.viewer_rsvp === 'going' && <Check size={18} color={colors.primary} />}
+                <Text
+                  style={{ color: event.viewer_rsvp === 'going' ? colors.primary : isFull ? colors.subtle : colors.onPrimary }}
+                  className={`font-semibold text-[16px] ${event.viewer_rsvp === 'going' ? 'ml-1.5' : ''}`}
+                >
                   {event.viewer_rsvp === 'going' ? 'Going' : isFull ? 'Full' : "I'm in"}
                 </Text>
               </TouchableOpacity>
               <TouchableOpacity
                 onPress={() => rsvp('not_going')}
                 disabled={isSaving}
-                activeOpacity={0.85}
-                className={`flex-1 h-[52px] rounded-2xl flex-row items-center justify-center border ${
-                  event.viewer_rsvp === 'not_going' ? 'bg-slate-800 border-slate-800' : 'bg-white border-slate-200'
+                activeOpacity={0.8}
+                className={`flex-1 h-[50px] rounded-xl flex-row items-center justify-center ${
+                  event.viewer_rsvp === 'not_going' ? 'bg-ink' : 'bg-fill'
                 }`}
               >
-                <Text className={`font-bold text-base ${event.viewer_rsvp === 'not_going' ? 'text-white' : 'text-ink'}`}>
+                <Text className={`font-semibold text-[16px] ${event.viewer_rsvp === 'not_going' ? 'text-canvas' : 'text-ink'}`}>
                   Can&apos;t go
                 </Text>
               </TouchableOpacity>
             </View>
             {event.viewer_rsvp && (
-              <Text className="text-[12px] text-slate-400 text-center mt-2">Tap your answer again to clear it.</Text>
+              <Text className="text-[13px] text-muted text-center mt-2">Tap your answer again to clear it.</Text>
             )}
           </View>
         )}
@@ -615,71 +654,51 @@ export default function EventDetailScreen() {
         {chatAvailable && (
           <TouchableOpacity
             onPress={() => openEventChat(event.id, token, event.occurrence_date)}
-            activeOpacity={0.85}
-            className="bg-white rounded-3xl border border-slate-200 p-5 mt-3 flex-row items-center"
+            activeOpacity={0.7}
+            className="bg-surface rounded-2xl px-4 py-3.5 mt-3 flex-row items-center"
           >
-            <View style={{ backgroundColor: colors.primarySoft }} className="w-10 h-10 rounded-2xl items-center justify-center">
-              <MessageCircle size={20} color={colors.primary} />
+            <View className="w-10 h-10 rounded-full bg-fill items-center justify-center">
+              <MessageCircle size={20} color={colors.ink} />
             </View>
             <View className="flex-1 ml-3">
-              <Text className="text-[16px] font-bold text-ink">Group chat</Text>
-              <Text className="text-[13px] text-slate-500 mt-0.5">
+              <Text className="text-[16px] font-semibold text-ink">Group chat</Text>
+              <Text className="text-[13px] text-muted mt-0.5">
                 {ended && chatClosesLabel
                   ? `Still open for follow-ups. Disappears ${chatClosesLabel}.`
                   : 'With everyone going. Disappears the day after.'}
               </Text>
             </View>
-            <ChevronRight size={18} color={colors.subtle} />
+            <ChevronRight size={18} color={colors.faint} />
           </TouchableOpacity>
         )}
         {chatCanOpenLater && (
           <View className="flex-row items-center mt-3 px-1">
             <Lock size={14} color={colors.subtle} />
-            <Text className="text-[13px] text-slate-500 ml-2 flex-1">Tap &quot;I&apos;m in&quot; to join the group chat with everyone going.</Text>
+            <Text className="text-[13px] text-muted ml-2 flex-1">Tap &quot;I&apos;m in&quot; to join the group chat with everyone going.</Text>
           </View>
         )}
         {chatClosed && (
           <View className="flex-row items-center mt-3 px-1">
             <MessageCircle size={14} color={colors.subtle} />
-            <Text className="text-[13px] text-slate-500 ml-2 flex-1">The group chat for this one has disappeared.</Text>
+            <Text className="text-[13px] text-muted ml-2 flex-1">The group chat for this one has disappeared.</Text>
           </View>
         )}
 
         <View className="flex-row gap-2 mt-3">
-          <TouchableOpacity
-            onPress={() => copyInviteLink(eventShareUrl(event))}
-            className="flex-1 h-12 rounded-2xl bg-white border border-slate-200 flex-row items-center justify-center"
-          >
-            <Copy size={16} color={colors.ink} />
-            <Text className="font-semibold text-ink ml-2">Copy link</Text>
-          </TouchableOpacity>
-          {isHost && (
-            <TouchableOpacity
-              onPress={openInvites}
-              className="flex-1 h-12 rounded-2xl bg-white border border-slate-200 flex-row items-center justify-center"
-            >
-              <Users size={16} color={colors.ink} />
-              <Text className="font-semibold text-ink ml-2">Invite</Text>
-            </TouchableOpacity>
-          )}
-          <TouchableOpacity
-            onPress={() => shareEvent(event)}
-            className="flex-1 h-12 rounded-2xl bg-white border border-slate-200 flex-row items-center justify-center"
-          >
-            <Share2 size={16} color={colors.ink} />
-            <Text className="font-semibold text-ink ml-2">Share</Text>
-          </TouchableOpacity>
+          <ShareAction icon={Copy} label="Copy link" onPress={() => copyInviteLink(eventShareUrl(event))} />
+          {isHost && <ShareAction icon={UserPlus} label="Invite" onPress={openInvites} />}
+          <ShareAction icon={Share2} label="Share" onPress={() => shareEvent(event)} />
         </View>
         {event.link_url && (
-          <View className="mt-2">
-            <TouchableOpacity
-              onPress={() => openExternalUrl(event.link_url)}
-              className="flex-1 h-12 rounded-2xl bg-primary flex-row items-center justify-center"
-            >
-              <ExternalLink size={16} color="white" />
-              <Text className="font-semibold text-white ml-2" numberOfLines={1}>{linkLabel(event.link_url)}</Text>
-            </TouchableOpacity>
-          </View>
+          <TouchableOpacity
+            onPress={() => openExternalUrl(event.link_url)}
+            activeOpacity={0.6}
+            className="mt-2 bg-surface rounded-2xl px-4 h-[52px] flex-row items-center"
+          >
+            <ExternalLink size={18} color={colors.muted} />
+            <Text className="text-[16px] text-ink ml-3 flex-1" numberOfLines={1}>{linkLabel(event.link_url)}</Text>
+            <ChevronRight size={18} color={colors.faint} />
+          </TouchableOpacity>
         )}
 
         {showMentions && <EventMentions mentions={mentions} spaceName={event.space.name} userId={userId} />}
@@ -687,13 +706,13 @@ export default function EventDetailScreen() {
         {!hosted && (
           <View className="flex-row items-center mt-4 px-1">
             <CalendarDays size={14} color={colors.subtle} />
-            <Text className="text-[13px] text-slate-500 ml-2 flex-1">Mentioned in reviews. Headcounts are 3rdSpace people, not the venue&apos;s list.</Text>
+            <Text className="text-[13px] text-muted ml-2 flex-1">Mentioned in reviews. Headcounts are 3rdSpace people, not the venue&apos;s list.</Text>
           </View>
         )}
 
         {isHost && !event.cancelled_at && !ended && (
-          <TouchableOpacity onPress={cancel} className="mt-6 items-center">
-            <Text className="text-rose-600 font-semibold">Cancel hangout</Text>
+          <TouchableOpacity onPress={cancel} activeOpacity={0.6} className="mt-6 h-11 items-center justify-center">
+            <Text className="text-[15px] text-danger font-semibold">Cancel hangout</Text>
           </TouchableOpacity>
         )}
       </ScrollView>

@@ -3,7 +3,6 @@ import {
   ActivityIndicator,
   Alert,
   KeyboardAvoidingView,
-  Modal,
   Platform,
   ScrollView,
   Switch,
@@ -17,17 +16,33 @@ import { router, useFocusEffect, useLocalSearchParams } from 'expo-router';
 import MapView, { Marker } from 'react-native-maps';
 import type { LatLng, MapPressEvent, MarkerDragStartEndEvent, Region } from 'react-native-maps';
 import * as Location from 'expo-location';
-import { ArrowLeft, ArrowRight, Check, CircleCheck, Globe, KeyRound, LocateFixed, MapPin, Search, Send, Sparkles, Users, X } from 'lucide-react-native';
+import {
+  ArrowLeft,
+  ArrowRight,
+  Check,
+  ChevronRight,
+  CircleCheck,
+  Globe,
+  KeyRound,
+  LocateFixed,
+  MapPin,
+  Plus,
+  Search,
+  Send,
+  UserPlus,
+  UsersRound,
+  X,
+} from 'lucide-react-native';
 import PhotoPickerRow from '@/components/PhotoPickerRow';
 import VibeSlider from '@/components/VibeSlider';
-import { Avatar, CategoryIcon, Chip, PrimaryButton, ProgressBar, ScorePill } from '@/components/ui';
+import { Avatar, CategoryIcon, Chip, EmptyState, PrimaryButton, ProgressBar, ScorePill, Sheet } from '@/components/ui';
 import { useAuth } from '@/lib/auth';
 import { getProfile, listMyGroups, listSecretSpots, listSocialProfiles, listSpaces, submitRating } from '@/lib/data';
 import { formatDistance, getDisplayName } from '@/lib/format';
 import { openProfile } from '@/lib/links';
 import { buildViewbox, rankSearchResults } from '@/lib/search';
 import { isSupabaseConfigured } from '@/lib/supabase';
-import { CATEGORY_META, colors } from '@/lib/theme';
+import { CATEGORY_META, useColors, useColorSchemeName } from '@/lib/theme';
 import {
   calculateDistanceMiles,
   calculateOverallScore,
@@ -94,9 +109,11 @@ const createInitialRatings = (category: SpaceCategory = DEFAULT_CATEGORY): Ratin
 });
 
 export default function RateScreen() {
+  const colors = useColors();
+  const scheme = useColorSchemeName();
   const { userId, user } = useAuth();
   const params = useLocalSearchParams<{ spaceId?: string }>();
-  const scrollRef = useRef<ScrollView>(null);
+  const scrollRef = useRef<React.ComponentRef<typeof ScrollView>>(null);
   const mapRef = useRef<MapView>(null);
   const mapCenterRef = useRef<LatLng>({ latitude: DEFAULT_REGION.latitude, longitude: DEFAULT_REGION.longitude });
 
@@ -438,16 +455,16 @@ export default function RateScreen() {
   if (result) {
     const unlockedMilestone = result.after.current.threshold > result.before.current.threshold ? result.after.current : null;
     return (
-      <SafeAreaView edges={['top']} className="flex-1 bg-slate-50">
-        <ScrollView contentContainerStyle={{ padding: 20, paddingTop: 48 }}>
-          <View className="items-center">
-            <View className={`w-20 h-20 rounded-full items-center justify-center ${result.isSecret ? 'bg-secret' : 'bg-emerald-500'}`}>
-              {result.isSecret ? <KeyRound size={36} color="white" /> : <Check size={40} color="white" />}
+      <SafeAreaView edges={['top']} className="flex-1 bg-canvas">
+        <ScrollView contentContainerStyle={{ paddingHorizontal: 16, paddingTop: 56, paddingBottom: 24 }}>
+          <View className="items-center px-4">
+            <View className={`w-16 h-16 rounded-full items-center justify-center ${result.isSecret ? 'bg-secret/10' : 'bg-success-soft'}`}>
+              {result.isSecret ? <KeyRound size={28} color={colors.secret} /> : <Check size={30} color={colors.success} strokeWidth={2.5} />}
             </View>
-            <Text className="text-[28px] font-extrabold text-ink mt-5 text-center">
-              {result.isSecret ? 'Secret spot saved' : 'Spot rated!'}
+            <Text className="text-[26px] font-bold text-ink tracking-tight mt-5 text-center">
+              {result.isSecret ? 'Secret spot saved' : 'Spot rated'}
             </Text>
-            <Text className="text-slate-500 text-center mt-2 text-[15px] leading-5 px-4">
+            <Text className="text-[15px] text-muted text-center mt-1.5 leading-[22px]">
               {result.isSecret
                 ? `${result.name} is hidden from the map and feed. People have to ask you or trade to see it.`
                 : `Thanks for putting ${result.name} on the map.`}
@@ -455,35 +472,34 @@ export default function RateScreen() {
           </View>
 
           {unlockedMilestone ? (
-            <View className="bg-white rounded-3xl border-2 border-secret p-5 mt-8">
-              <View className="flex-row items-center">
-                <Sparkles size={18} color={colors.secret} />
-                <Text className="text-secret font-bold ml-2 uppercase text-xs tracking-wider">Milestone unlocked</Text>
+            <View className="bg-surface rounded-2xl p-5 mt-8">
+              <Text className="text-[13px] font-medium text-secret">Milestone unlocked</Text>
+              <Text className="text-[20px] font-bold text-ink tracking-tight mt-1">{unlockedMilestone.name}</Text>
+              <Text className="text-[15px] text-body mt-1 leading-[22px]">{unlockedMilestone.description}</Text>
+              <View className="bg-fill rounded-xl px-3.5 py-1.5 mt-4">
+                {unlockedMilestone.perks.map((perk) => (
+                  <View key={perk} className="flex-row items-center py-1.5">
+                    <CircleCheck size={16} color={colors.success} />
+                    <Text className="text-[15px] text-body ml-2.5 flex-1">{perk}</Text>
+                  </View>
+                ))}
               </View>
-              <Text className="text-2xl font-extrabold text-ink mt-2">{unlockedMilestone.name}</Text>
-              <Text className="text-slate-500 mt-1">{unlockedMilestone.description}</Text>
-              {unlockedMilestone.perks.map((perk) => (
-                <View key={perk} className="flex-row items-center mt-2.5">
-                  <CircleCheck size={16} color={colors.success} />
-                  <Text className="text-slate-700 ml-2 flex-1">{perk}</Text>
-                </View>
-              ))}
             </View>
           ) : result.after.next ? (
-            <View className="bg-white rounded-3xl border border-slate-200 p-5 mt-8">
-              <Text className="text-sm text-slate-500">Next milestone</Text>
-              <Text className="text-xl font-bold text-ink mt-0.5">{result.after.next.name}</Text>
+            <View className="bg-surface rounded-2xl p-5 mt-8">
+              <Text className="text-[13px] font-medium text-muted">Next milestone</Text>
+              <Text className="text-[18px] font-semibold text-ink mt-0.5">{result.after.next.name}</Text>
               <View className="mt-3">
-                <ProgressBar progress={result.after.progress} color={colors.secret} />
+                <ProgressBar progress={result.after.progress} color={colors.ink} />
               </View>
-              <Text className="text-sm text-slate-500 mt-2">
+              <Text className="text-[13px] text-muted mt-2 leading-[18px]">
                 {result.after.remaining} more {result.after.remaining === 1 ? 'spot' : 'spots'} to unlock: {result.after.next.perks[0]}
               </Text>
             </View>
           ) : null}
 
           <View className="mt-8 gap-3">
-            <PrimaryButton label="Rate another spot" icon={Sparkles} onPress={resetFlow} />
+            <PrimaryButton label="Rate another spot" icon={Plus} onPress={resetFlow} />
             <PrimaryButton
               tone="neutral"
               label={result.isSecret ? 'See my secret spots' : 'See it in the feed'}
@@ -502,54 +518,60 @@ export default function RateScreen() {
   const visibleStepIndex = step;
 
   return (
-    <SafeAreaView edges={['top']} className="flex-1 bg-slate-50">
+    <SafeAreaView edges={['top']} className="flex-1 bg-canvas">
       <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} className="flex-1">
-        <View className="px-5 pt-3 pb-4">
-          <View className="flex-row items-center justify-between">
-            <Text className="text-xs font-bold text-primary uppercase tracking-wider">
+        <View className="px-5 pt-3 pb-5">
+          <View className="flex-row items-center justify-between h-6">
+            <Text className="text-[13px] font-medium text-muted">
               Step {visibleStepIndex + 1} of 3
             </Text>
             {selectedSpace && (
-              <TouchableOpacity onPress={resetFlow} activeOpacity={0.7}>
-                <Text className="text-sm font-semibold text-slate-400">Start over</Text>
+              <TouchableOpacity onPress={resetFlow} activeOpacity={0.6} hitSlop={8}>
+                <Text className="text-[15px] font-medium text-primary">Start over</Text>
               </TouchableOpacity>
             )}
           </View>
-          <Text className="text-[28px] font-extrabold text-ink tracking-tight mt-1">{STEPS[step].title}</Text>
-          <Text className="text-[15px] text-slate-500 mt-1">{STEPS[step].subtitle}</Text>
-          <View className="flex-row gap-1.5 mt-4">
+          <View className="flex-row gap-1.5 mt-2">
             {STEPS.map((_, index) => (
               <View
                 key={index}
-                className={`flex-1 h-1.5 rounded-full ${index <= step ? 'bg-primary' : 'bg-slate-200'}`}
+                className={`flex-1 h-1 rounded-full ${index <= step ? 'bg-ink' : 'bg-fill-strong'}`}
               />
             ))}
           </View>
+          <Text className="text-[26px] font-bold text-ink tracking-tight mt-4">{STEPS[step].title}</Text>
+          <Text className="text-[15px] text-muted mt-1 leading-5">{STEPS[step].subtitle}</Text>
         </View>
 
-        <ScrollView ref={scrollRef} className="flex-1" contentContainerStyle={{ paddingHorizontal: 20, paddingBottom: 24 }} keyboardShouldPersistTaps="handled">
+        <ScrollView ref={scrollRef} className="flex-1" contentContainerStyle={{ paddingHorizontal: 16, paddingBottom: 32 }} keyboardShouldPersistTaps="handled">
           {step === 0 && (
             <>
-              <View className="bg-white border border-slate-200 rounded-2xl px-4 h-[52px] flex-row items-center">
-                <Search size={18} color={colors.subtle} />
+              <View className="bg-surface rounded-xl px-4 h-12 flex-row items-center">
+                <Search size={18} color={colors.muted} />
                 <TextInput
                   value={searchQuery}
                   onChangeText={setSearchQuery}
                   placeholder="Search a cafe, park, court..."
                   placeholderTextColor={colors.subtle}
+                  keyboardAppearance={scheme}
                   autoCapitalize="words"
                   autoCorrect={false}
-                  className="flex-1 ml-2 text-base text-ink"
+                  className="flex-1 ml-2.5 text-[16px] text-ink"
                 />
-                {isSearching && <ActivityIndicator size="small" color={colors.primary} />}
+                {isSearching && <ActivityIndicator size="small" color={colors.muted} />}
                 {!isSearching && searchQuery.length > 0 && (
-                  <TouchableOpacity onPress={clearPlace} accessibilityLabel="Clear">
-                    <X size={18} color={colors.subtle} />
+                  <TouchableOpacity
+                    onPress={clearPlace}
+                    accessibilityLabel="Clear"
+                    hitSlop={8}
+                    className="w-6 h-6 rounded-full bg-fill items-center justify-center"
+                  >
+                    <X size={14} color={colors.muted} strokeWidth={2.5} />
                   </TouchableOpacity>
                 )}
               </View>
 
-              <View className="flex-row items-center gap-2 mt-2.5">
+              <View className="flex-row items-center gap-2 mt-3">
                 <Chip
                   label={userCoordinate ? 'Near me' : 'Near map area'}
                   icon={LocateFixed}
@@ -565,67 +587,67 @@ export default function RateScreen() {
               </View>
 
               {(knownMatches.length > 0 || suggestions.length > 0 || searchError) && (
-                <View className="bg-white border border-slate-200 rounded-2xl mt-2 overflow-hidden">
+                <View className="bg-surface rounded-2xl mt-3 pb-1 overflow-hidden">
                   {knownMatches.length > 0 && (
-                    <Text className="px-4 pt-3 pb-1 text-[11px] font-bold text-slate-400 uppercase tracking-wider">On Third Space</Text>
+                    <Text className="px-4 pt-3 pb-1 text-[13px] font-medium text-muted">On Third Space</Text>
                   )}
-                  {knownMatches.map((space) => (
-                    <TouchableOpacity
-                      key={space.id}
-                      onPress={() => selectExistingSpace(space)}
-                      className="px-4 py-3 flex-row items-center border-b border-slate-100"
-                      activeOpacity={0.7}
-                    >
-                      <CategoryIcon category={space.category} size={32} />
-                      <View className="flex-1 ml-3">
-                        <Text className="font-semibold text-ink" numberOfLines={1}>{space.name}</Text>
-                        <Text className="text-xs text-slate-500" numberOfLines={1}>{space.address}</Text>
-                      </View>
-                      {space.attributes && <ScorePill score={space.attributes.overall_score} size="sm" />}
-                    </TouchableOpacity>
+                  {knownMatches.map((space, index) => (
+                    <View key={space.id}>
+                      {index > 0 && <View className="h-px bg-line-soft ml-16" />}
+                      <TouchableOpacity
+                        onPress={() => selectExistingSpace(space)}
+                        className="px-4 py-2.5 flex-row items-center"
+                        activeOpacity={0.6}
+                      >
+                        <CategoryIcon category={space.category} size={36} />
+                        <View className="flex-1 ml-3">
+                          <Text className="text-[16px] font-semibold text-ink" numberOfLines={1}>{space.name}</Text>
+                          <Text className="text-[13px] text-muted mt-0.5" numberOfLines={1}>{space.address}</Text>
+                        </View>
+                        {space.attributes && <ScorePill score={space.attributes.overall_score} size="sm" />}
+                      </TouchableOpacity>
+                    </View>
                   ))}
                   {suggestions.length > 0 && (
-                    <Text className="px-4 pt-3 pb-1 text-[11px] font-bold text-slate-400 uppercase tracking-wider">New place</Text>
+                    <Text className={`px-4 pb-1 text-[13px] font-medium text-muted ${knownMatches.length > 0 ? 'pt-4' : 'pt-3'}`}>New place</Text>
                   )}
-                  {searchError && <Text className="p-4 text-sm text-rose-600">{searchError}</Text>}
-                  {suggestions.map((suggestion, index) => (
-                    <React.Fragment key={suggestion.place_id}>
-                    {suggestion.isFar && !suggestions[index - 1]?.isFar && searchScope === 'nearby' && (
-                      <Text className="px-4 pt-3 pb-1 text-[11px] font-bold text-slate-400 uppercase tracking-wider">
-                        Farther away
-                      </Text>
-                    )}
-                    <TouchableOpacity
-                      onPress={() => handleSelectSuggestion(suggestion)}
-                      className={`px-4 py-3 flex-row items-center ${index < suggestions.length - 1 ? 'border-b border-slate-100' : ''}`}
-                      activeOpacity={0.7}
-                    >
-                      <View className="w-8 h-8 rounded-lg bg-slate-100 items-center justify-center">
-                        <MapPin size={16} color={colors.muted} />
-                      </View>
-                      <View className="flex-1 ml-3">
-                        <Text className="font-semibold text-ink" numberOfLines={1}>
-                          {suggestion.name || suggestion.display_name.split(',')[0]}
-                        </Text>
-                        <Text className="text-xs text-slate-500" numberOfLines={1}>{suggestion.display_name}</Text>
-                      </View>
-                      <Text className="text-xs font-semibold text-slate-400 ml-2">{formatDistance(suggestion.distance)}</Text>
-                    </TouchableOpacity>
-                    </React.Fragment>
-                  ))}
+                  {searchError && <Text className="px-4 py-3 text-[14px] text-danger">{searchError}</Text>}
+                  {suggestions.map((suggestion, index) => {
+                    const startsFarGroup = suggestion.isFar && !suggestions[index - 1]?.isFar && searchScope === 'nearby';
+                    return (
+                      <React.Fragment key={suggestion.place_id}>
+                        {startsFarGroup && (
+                          <Text className="px-4 pt-4 pb-1 text-[13px] font-medium text-muted">Farther away</Text>
+                        )}
+                        {index > 0 && !startsFarGroup && <View className="h-px bg-line-soft ml-16" />}
+                        <TouchableOpacity
+                          onPress={() => handleSelectSuggestion(suggestion)}
+                          className="px-4 py-2.5 flex-row items-center"
+                          activeOpacity={0.6}
+                        >
+                          <View className="w-9 h-9 rounded-[10px] bg-fill items-center justify-center">
+                            <MapPin size={17} color={colors.muted} />
+                          </View>
+                          <View className="flex-1 ml-3">
+                            <Text className="text-[16px] font-semibold text-ink" numberOfLines={1}>
+                              {suggestion.name || suggestion.display_name.split(',')[0]}
+                            </Text>
+                            <Text className="text-[13px] text-muted mt-0.5" numberOfLines={1}>{suggestion.display_name}</Text>
+                          </View>
+                          <Text className="text-[13px] text-muted ml-2">{formatDistance(suggestion.distance)}</Text>
+                        </TouchableOpacity>
+                      </React.Fragment>
+                    );
+                  })}
                 </View>
               )}
 
-              <View className="flex-row items-center my-4">
-                <View className="flex-1 h-px bg-slate-200" />
-                <Text className="mx-3 text-xs font-semibold text-slate-400">OR DROP A PIN</Text>
-                <View className="flex-1 h-px bg-slate-200" />
-              </View>
-
-              <View className="rounded-3xl overflow-hidden border border-slate-200 bg-white">
+              <Text className="text-[13px] font-medium text-muted px-4 mt-6 mb-1.5">Or drop a pin</Text>
+              <View className="rounded-2xl overflow-hidden bg-surface">
                 <MapView
                   ref={mapRef}
                   style={{ height: 240 }}
+                  userInterfaceStyle={scheme}
                   initialRegion={DEFAULT_REGION}
                   onPress={handleMapPress}
                   onRegionChangeComplete={(region) => {
@@ -637,52 +659,64 @@ export default function RateScreen() {
                   )}
                 </MapView>
                 <View className="px-4 py-3 flex-row items-center">
-                  <MapPin size={14} color={colors.subtle} />
-                  <Text className="text-[13px] text-slate-500 ml-1.5 flex-1">
+                  {isReverseGeocoding ? <ActivityIndicator size="small" color={colors.muted} /> : <MapPin size={14} color={colors.subtle} />}
+                  <Text className="text-[13px] text-muted ml-1.5 flex-1">
                     {isReverseGeocoding ? 'Finding the address...' : 'Tap anywhere to drop a pin. Drag it to fine-tune.'}
                   </Text>
                 </View>
               </View>
 
               {selectedSpace && (
-                <View className="bg-white border-2 border-primary rounded-2xl p-4 mt-4 flex-row items-center">
-                  <View className="w-9 h-9 rounded-full bg-primary items-center justify-center">
-                    <Check size={18} color="white" />
+                <>
+                  <Text className="text-[13px] font-medium text-muted px-4 mt-6 mb-1.5">Selected place</Text>
+                  <View className="bg-surface rounded-2xl p-4 flex-row items-center">
+                    <View className="w-9 h-9 rounded-full bg-ink items-center justify-center">
+                      <Check size={18} color={colors.canvas} strokeWidth={2.5} />
+                    </View>
+                    <View className="flex-1 ml-3">
+                      <Text className="text-[16px] font-semibold text-ink" numberOfLines={1}>{selectedSpace.name}</Text>
+                      <Text className="text-[13px] text-muted mt-0.5 leading-[18px]" numberOfLines={2}>{selectedSpace.address}</Text>
+                    </View>
                   </View>
-                  <View className="flex-1 ml-3">
-                    <Text className="font-bold text-ink" numberOfLines={1}>{selectedSpace.name}</Text>
-                    <Text className="text-xs text-slate-500 mt-0.5" numberOfLines={2}>{selectedSpace.address}</Text>
-                  </View>
-                </View>
+                </>
               )}
             </>
           )}
 
           {step === 1 && (
             <>
-              <View className="flex-row flex-wrap -mx-1.5">
+              <View className="flex-row flex-wrap -mx-1">
                 {SPACE_CATEGORIES.map((category) => {
                   const meta = CATEGORY_META[category];
                   const isSelected = ratings.category === category;
                   return (
-                    <View key={category} style={{ width: '50%' }} className="p-1.5">
+                    <View key={category} style={{ width: '50%' }} className="p-1">
                       <TouchableOpacity
                         onPress={() => selectCategory(category)}
-                        activeOpacity={0.8}
-                        style={isSelected ? { borderColor: meta.color, backgroundColor: meta.tint } : undefined}
-                        className={`rounded-2xl p-3.5 border-2 ${isSelected ? '' : 'bg-white border-slate-200'}`}
+                        activeOpacity={0.7}
+                        accessibilityRole="radio"
+                        accessibilityState={{ selected: isSelected }}
+                        style={{ backgroundColor: isSelected ? meta.tint : colors.surface }}
+                        className="rounded-2xl p-3.5"
                       >
-                        <CategoryIcon category={category} size={36} />
-                        <Text className="font-bold text-ink mt-2.5">{meta.short}</Text>
-                        <Text className="text-xs text-slate-500 mt-0.5" numberOfLines={1}>{meta.blurb}</Text>
+                        <View className="flex-row items-start justify-between">
+                          <CategoryIcon category={category} size={36} />
+                          {isSelected && (
+                            <View style={{ backgroundColor: meta.color }} className="w-5 h-5 rounded-full items-center justify-center">
+                              <Check size={12} color="white" strokeWidth={3} />
+                            </View>
+                          )}
+                        </View>
+                        <Text className="text-[16px] font-semibold text-ink mt-3">{meta.short}</Text>
+                        <Text className="text-[13px] text-muted mt-0.5" numberOfLines={1}>{meta.blurb}</Text>
                       </TouchableOpacity>
                     </View>
                   );
                 })}
               </View>
 
-              <Text className="text-[17px] font-bold text-ink mt-6 mb-1">What's it best for?</Text>
-              <Text className="text-[13px] text-slate-500 mb-3">This helps people find the right spot for what they want to do.</Text>
+              <Text className="text-[18px] font-semibold text-ink mt-8">What's it best for?</Text>
+              <Text className="text-[14px] text-muted mt-1 mb-3 leading-5">This helps people find the right spot for what they want to do.</Text>
               <View className="flex-row flex-wrap gap-2">
                 {categoryConfig.purposes.map((purpose) => (
                   <Chip
@@ -690,7 +724,6 @@ export default function RateScreen() {
                     label={purpose}
                     selected={ratings.primary_purpose === purpose}
                     onPress={() => selectPurpose(purpose)}
-                    color={categoryMeta.color}
                   />
                 ))}
               </View>
@@ -699,36 +732,36 @@ export default function RateScreen() {
 
           {step === 2 && selectedSpace && (
             <>
-              <View className="bg-white rounded-2xl border border-slate-200 p-3.5 flex-row items-center mb-5">
+              <View className="bg-surface rounded-2xl p-3.5 flex-row items-center mb-6">
                 <CategoryIcon category={ratings.category} size={44} />
                 <View className="flex-1 mx-3">
-                  <Text className="font-bold text-ink" numberOfLines={1}>{selectedSpace.name}</Text>
-                  <Text className="text-xs text-slate-500 mt-0.5">{categoryMeta.short} · {ratings.primary_purpose}</Text>
+                  <Text className="text-[16px] font-semibold text-ink" numberOfLines={1}>{selectedSpace.name}</Text>
+                  <Text className="text-[13px] text-muted mt-0.5" numberOfLines={1}>{categoryMeta.short} · {ratings.primary_purpose}</Text>
                 </View>
                 <View className="items-center">
                   <ScorePill score={overallScore} />
-                  <Text className="text-[10px] text-slate-400 mt-1">overall</Text>
+                  <Text className="text-[11px] text-subtle mt-1">Overall</Text>
                 </View>
               </View>
 
               {isExistingSpace && (
                 <>
-                  <Text className="text-[13px] font-semibold text-slate-500 mb-2">Went here for</Text>
-                  <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8 }} className="mb-5">
+                  <Text className="text-[13px] font-medium text-muted px-4 mb-1.5">Went here for</Text>
+                  <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8 }} className="mb-6">
                     {categoryConfig.purposes.map((purpose) => (
                       <Chip
                         key={purpose}
                         label={purpose}
                         selected={ratings.primary_purpose === purpose}
                         onPress={() => selectPurpose(purpose)}
-                        color={categoryMeta.color}
                       />
                     ))}
                   </ScrollView>
                 </>
               )}
 
-              <View className="bg-white rounded-3xl border border-slate-200 p-4 pb-0">
+              <Text className="text-[13px] font-medium text-muted px-4 mb-1.5">Scores</Text>
+              <View className="bg-surface rounded-2xl p-4 pb-0">
                 {categoryConfig.attributes.map((attribute) => (
                   <VibeSlider
                     key={attribute.key}
@@ -745,26 +778,27 @@ export default function RateScreen() {
                 ))}
               </View>
 
-              <Text className="text-[15px] font-bold text-ink mt-5 mb-2">Anything people should know?</Text>
+              <Text className="text-[18px] font-semibold text-ink mt-8 mb-3">Anything people should know?</Text>
               <TextInput
                 value={ratings.review_text}
                 onChangeText={(review_text) => setRatings((prev) => ({ ...prev, review_text }))}
                 placeholder="Best time to go, what to order, where to sit..."
                 placeholderTextColor={colors.subtle}
+                keyboardAppearance={scheme}
                 multiline
-                className="bg-white border border-slate-200 rounded-2xl px-4 py-3 min-h-[96px] text-base text-ink"
+                className="bg-surface rounded-xl px-4 py-3 min-h-[96px] text-[16px] text-ink leading-[22px]"
                 textAlignVertical="top"
               />
 
-              <Text className="text-[15px] font-bold text-ink mt-5 mb-2">With</Text>
-              <Text className="text-[13px] text-slate-500 mb-2">Friends and public groups show on the post for everyone, like a tag on a photo. A private group only shows for people in that group.</Text>
+              <Text className="text-[18px] font-semibold text-ink mt-8">Who were you with?</Text>
+              <Text className="text-[14px] text-muted mt-1 mb-3 leading-5">Friends and public groups show on the post for everyone, like a tag on a photo. A private group only shows for people in that group.</Text>
               {myGroups.length > 0 && (
                 <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8 }} className="mb-3">
                   {myGroups.map((group) => (
                     <Chip
                       key={group.id}
                       label={group.visibility === 'private' ? `${group.name} · private` : group.name}
-                      icon={Users}
+                      icon={UsersRound}
                       selected={withGroupIds.includes(group.id)}
                       onPress={() => setWithGroupIds((current) => current.includes(group.id)
                         ? current.filter((id) => id !== group.id)
@@ -774,37 +808,53 @@ export default function RateScreen() {
                 </ScrollView>
               )}
               {myGroups.some((group) => withGroupIds.includes(group.id) && group.visibility === 'private') && (
-                <Text className="text-[13px] text-slate-500 mb-2">
+                <Text className="text-[13px] text-muted mb-3 px-1 leading-[18px]">
                   {myGroups.filter((group) => withGroupIds.includes(group.id) && group.visibility === 'private').map((group) => group.name).join(', ')} won't show for anyone who isn't in that group.
                 </Text>
               )}
               <TouchableOpacity
                 onPress={() => setShowWithPeople(true)}
-                className="bg-white border border-slate-200 rounded-2xl px-4 py-3 mb-2 flex-row items-center"
+                activeOpacity={0.6}
+                className="bg-surface rounded-2xl px-4 min-h-[52px] py-2.5 flex-row items-center"
               >
-                <Users size={16} color={colors.primary} />
-                <Text className="font-semibold text-ink ml-2 flex-1" numberOfLines={1}>
+                {withPeople.length === 0 ? (
+                  <UserPlus size={18} color={colors.ink} />
+                ) : (
+                  <View className="flex-row">
+                    {withPeople.slice(0, 3).map((person, index) => (
+                      <View
+                        key={person.user_id}
+                        style={{ marginLeft: index === 0 ? 0 : -8, borderColor: colors.surface }}
+                        className="rounded-full border-2"
+                      >
+                        <Avatar name={getDisplayName(person)} uri={person.avatar_url} size={26} />
+                      </View>
+                    ))}
+                  </View>
+                )}
+                <Text className="text-[16px] text-ink ml-3 flex-1" numberOfLines={1}>
                   {withPeople.length === 0
                     ? 'Add friends'
                     : withPeople.map((person) => getDisplayName(person)).join(', ')}
                 </Text>
+                <ChevronRight size={18} color={colors.faint} />
               </TouchableOpacity>
 
-              <Text className="text-[15px] font-bold text-ink mt-5">Add photos</Text>
-              <Text className="text-[13px] text-slate-500 mt-0.5 mb-2">
+              <Text className="text-[18px] font-semibold text-ink mt-8">Add photos</Text>
+              <Text className="text-[14px] text-muted mt-1 mb-3 leading-5">
                 Up to {MAX_PHOTOS_PER_POST}. They'll show up on this spot's page.
               </Text>
               <PhotoPickerRow photos={photos} onChange={setPhotos} disabled={isSubmitting} />
 
               {!isExistingSpace && (
-                <View className={`rounded-3xl p-4 mt-5 border-2 ${isSecret ? 'border-secret bg-secret/5' : 'border-slate-200 bg-white'}`}>
+                <View className="bg-surface rounded-2xl p-4 mt-8">
                   <View className="flex-row items-center">
-                    <View className={`w-10 h-10 rounded-xl items-center justify-center ${isSecret ? 'bg-secret' : 'bg-slate-100'}`}>
-                      <KeyRound size={20} color={isSecret ? 'white' : colors.muted} />
+                    <View className={`w-10 h-10 rounded-xl items-center justify-center ${isSecret ? 'bg-secret/10' : 'bg-fill'}`}>
+                      <KeyRound size={18} color={isSecret ? colors.secret : colors.muted} />
                     </View>
                     <View className="flex-1 mx-3">
-                      <Text className="font-bold text-ink text-[15px]">Gatekeeper mode</Text>
-                      <Text className="text-xs text-slate-500 mt-0.5">
+                      <Text className="text-[16px] font-semibold text-ink">Gatekeeper mode</Text>
+                      <Text className="text-[13px] text-muted mt-0.5">
                         {secretSlotsRemaining > 0
                           ? `${Number.isFinite(secretSlotsRemaining) ? secretSlotsRemaining : 'Unlimited'} secret ${secretSlotsRemaining === 1 ? 'slot' : 'slots'} left`
                           : `No slots left. Reach ${nextSlotMilestone?.name ?? 'the next milestone'} for more.`}
@@ -814,10 +864,12 @@ export default function RateScreen() {
                       value={isSecret}
                       onValueChange={setIsSecret}
                       disabled={secretSlotsRemaining <= 0 && !isSecret}
-                      trackColor={{ true: colors.secret, false: '#e2e8f0' }}
+                      trackColor={{ true: colors.secret, false: colors.fillStrong }}
+                      thumbColor="#ffffff"
+                      ios_backgroundColor={colors.fillStrong}
                     />
                   </View>
-                  <Text className="text-[13px] text-slate-600 mt-3 leading-[18px]">
+                  <Text className="text-[14px] text-body mt-3 leading-5">
                     Keep this spot secret. It won't appear on the map or feed. Others only see a teaser and have to ask you or trade one of their spots to get in.
                   </Text>
                   {isSecret && (
@@ -826,8 +878,9 @@ export default function RateScreen() {
                       onChangeText={setAreaHint}
                       placeholder="Teaser, e.g. 'Rosslyn, best sunset views'"
                       placeholderTextColor={colors.subtle}
+                      keyboardAppearance={scheme}
                       maxLength={60}
-                      className="mt-3 bg-white border border-secret/30 rounded-xl px-4 h-11 text-[15px] text-ink"
+                      className="mt-3 bg-fill rounded-xl px-4 h-12 text-[16px] text-ink"
                     />
                   )}
                 </View>
@@ -836,13 +889,13 @@ export default function RateScreen() {
           )}
         </ScrollView>
 
-        <View className="px-5 pt-3 pb-3 bg-white border-t border-slate-200 flex-row gap-3">
+        <View className="px-4 pt-3 pb-3 bg-canvas border-t border-line-soft flex-row gap-2.5">
           {step > 0 && (
             <TouchableOpacity
               onPress={goBack}
               accessibilityLabel="Back"
               activeOpacity={0.8}
-              className="w-[52px] h-[52px] rounded-2xl bg-slate-100 items-center justify-center"
+              className="w-[50px] h-[50px] rounded-xl bg-fill items-center justify-center"
             >
               <ArrowLeft size={20} color={colors.ink} />
             </TouchableOpacity>
@@ -860,51 +913,73 @@ export default function RateScreen() {
         </View>
       </KeyboardAvoidingView>
 
-      <Modal visible={showWithPeople} animationType="slide" presentationStyle="pageSheet" onRequestClose={() => setShowWithPeople(false)}>
-        <SafeAreaView className="flex-1 bg-slate-50">
-          <View className="flex-row items-center justify-between px-5 pt-2 pb-3">
-            <View className="flex-1 pr-3">
-              <Text className="text-[22px] font-extrabold text-ink">With friends</Text>
-              <Text className="text-[13px] text-slate-500 mt-1">People you follow. They can take their name off later.</Text>
-            </View>
-            <TouchableOpacity onPress={() => setShowWithPeople(false)} accessibilityLabel="Done" className="px-3 h-10 rounded-full bg-primary items-center justify-center">
-              <Text className="text-white font-semibold">Done</Text>
-            </TouchableOpacity>
-          </View>
-          <ScrollView contentContainerStyle={{ paddingHorizontal: 20, paddingBottom: 32 }}>
-            {following.length === 0 ? (
-              <Text className="text-slate-500">Follow someone first, then you can tag them here.</Text>
-            ) : following.map((person) => {
+      <Sheet
+        visible={showWithPeople}
+        onClose={() => setShowWithPeople(false)}
+        title="With friends"
+        subtitle="People you follow. They can take their name off later."
+        headerRight={(
+          <TouchableOpacity
+            onPress={() => setShowWithPeople(false)}
+            accessibilityLabel="Done"
+            hitSlop={8}
+            className="h-8 px-1 mr-2 items-center justify-center"
+          >
+            <Text className="text-[16px] font-semibold text-primary">Done</Text>
+          </TouchableOpacity>
+        )}
+      >
+        {following.length === 0 ? (
+          <EmptyState
+            icon={UsersRound}
+            title="No one to tag yet"
+            body="Follow someone first, then you can tag them here."
+          />
+        ) : (
+          <View className="bg-surface rounded-2xl overflow-hidden">
+            {following.map((person, index) => {
               const selected = withPeople.some((item) => item.user_id === person.user_id);
+              const name = getDisplayName(person);
               return (
-                <View key={person.user_id} className="flex-row items-center bg-white border border-slate-200 rounded-2xl px-3 py-3 mb-2">
-                  <TouchableOpacity
-                    onPress={() => {
-                      setShowWithPeople(false);
-                      openProfile(person.user_id, userId);
-                    }}
-                    accessibilityLabel={`View ${getDisplayName(person)}'s profile`}
-                  >
-                    <Avatar name={getDisplayName(person)} size={40} />
-                  </TouchableOpacity>
-                  <TouchableOpacity
-                    onPress={() => setWithPeople((current) => selected
-                      ? current.filter((item) => item.user_id !== person.user_id)
-                      : [...current, person])}
-                    className="ml-3 flex-1 flex-row items-center"
-                  >
-                    <View className="flex-1">
-                      <Text className="font-bold text-ink">{getDisplayName(person)}</Text>
-                      {person.username ? <Text className="text-[13px] text-slate-500">@{person.username}</Text> : null}
-                    </View>
-                    {selected && <Check size={18} color={colors.primary} />}
-                  </TouchableOpacity>
+                <View key={person.user_id}>
+                  {index > 0 && <View className="h-px bg-line-soft ml-[68px]" />}
+                  <View className="flex-row items-center px-4 py-2.5">
+                    <TouchableOpacity
+                      onPress={() => {
+                        setShowWithPeople(false);
+                        openProfile(person.user_id, userId);
+                      }}
+                      activeOpacity={0.6}
+                      accessibilityLabel={`View ${name}'s profile`}
+                    >
+                      <Avatar name={name} uri={person.avatar_url} size={40} />
+                    </TouchableOpacity>
+                    <TouchableOpacity
+                      onPress={() => setWithPeople((current) => selected
+                        ? current.filter((item) => item.user_id !== person.user_id)
+                        : [...current, person])}
+                      activeOpacity={0.6}
+                      accessibilityState={{ selected }}
+                      className="ml-3 flex-1 flex-row items-center"
+                    >
+                      <View className="flex-1 pr-3">
+                        <Text numberOfLines={1} className="text-[16px] font-semibold text-ink">{name}</Text>
+                        {person.username ? <Text numberOfLines={1} className="text-[13px] text-muted mt-0.5">@{person.username}</Text> : null}
+                      </View>
+                      <View
+                        style={selected ? { backgroundColor: colors.ink } : { borderWidth: 2, borderColor: colors.fillStrong }}
+                        className="w-6 h-6 rounded-full items-center justify-center"
+                      >
+                        {selected && <Check size={14} color={colors.canvas} strokeWidth={3} />}
+                      </View>
+                    </TouchableOpacity>
+                  </View>
                 </View>
               );
             })}
-          </ScrollView>
-        </SafeAreaView>
-      </Modal>
+          </View>
+        )}
+      </Sheet>
     </SafeAreaView>
   );
 }

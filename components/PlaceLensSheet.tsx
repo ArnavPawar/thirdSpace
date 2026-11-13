@@ -1,8 +1,8 @@
 import React, { useEffect, useState } from 'react';
-import { ActivityIndicator, Modal, ScrollView, Text, TextInput, TouchableOpacity, View } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
-import { Globe, LocateFixed, MapPin, Search, X } from 'lucide-react-native';
-import { colors } from '@/lib/theme';
+import { ActivityIndicator, Text, TextInput, View } from 'react-native';
+import { Globe, LocateFixed, MapPin, Search } from 'lucide-react-native';
+import { ListGroup, ListRow, Sheet } from '@/components/ui';
+import { useColors, useColorSchemeName } from '@/lib/theme';
 
 export interface CalendarPlace {
   label: string;
@@ -55,6 +55,8 @@ export default function PlaceLensSheet({
   onAnywhere: () => void;
   onPlace: (place: CalendarPlace) => void;
 }) {
+  const colors = useColors();
+  const scheme = useColorSchemeName();
   const [query, setQuery] = useState('');
   const [results, setResults] = useState<NominatimResult[]>([]);
   const [isSearching, setIsSearching] = useState(false);
@@ -105,73 +107,49 @@ export default function PlaceLensSheet({
   }, [query]);
 
   return (
-    <Modal visible={visible} animationType="slide" presentationStyle="pageSheet" onRequestClose={onClose}>
-      <SafeAreaView className="flex-1 bg-slate-50">
-        <View className="flex-row items-center justify-between px-5 pt-2 pb-3">
-          <View className="flex-1 pr-3">
-            <Text className="text-[22px] font-extrabold text-ink">Look around</Text>
-            <Text className="text-[14px] text-slate-500 mt-1">This only changes the calendar. Your location stays put.</Text>
-          </View>
-          <TouchableOpacity onPress={onClose} accessibilityLabel="Close" className="w-10 h-10 rounded-full bg-white border border-slate-200 items-center justify-center">
-            <X size={18} color={colors.ink} />
-          </TouchableOpacity>
-        </View>
+    <Sheet visible={visible} onClose={onClose} title="Look around" subtitle="This only changes the calendar. Your location stays put.">
+      <View className="bg-surface rounded-xl px-3 h-11 flex-row items-center mb-5">
+        <Search size={17} color={colors.subtle} />
+        <TextInput
+          value={query}
+          onChangeText={setQuery}
+          placeholder="Search a city, like New York"
+          placeholderTextColor={colors.subtle}
+          keyboardAppearance={scheme}
+          autoCapitalize="words"
+          autoCorrect={false}
+          className="flex-1 ml-2 text-[16px] text-ink"
+        />
+        {isSearching && <ActivityIndicator size="small" color={colors.muted} />}
+      </View>
 
-        <View className="px-5">
-          <TouchableOpacity onPress={onNearYou} className="bg-white border border-slate-200 rounded-2xl px-4 py-3 mb-2 flex-row items-center">
-            <LocateFixed size={18} color={colors.primary} />
-            <View className="ml-3 flex-1">
-              <Text className="font-bold text-ink">Near you</Text>
-              <Text className="text-[13px] text-slate-500 mt-0.5">Use this phone's location again.</Text>
-            </View>
-          </TouchableOpacity>
-          <TouchableOpacity onPress={onAnywhere} className="bg-white border border-slate-200 rounded-2xl px-4 py-3 flex-row items-center">
-            <Globe size={18} color={colors.primary} />
-            <View className="ml-3 flex-1">
-              <Text className="font-bold text-ink">Anywhere</Text>
-              <Text className="text-[13px] text-slate-500 mt-0.5">Turn the distance filter off for this visit.</Text>
-            </View>
-          </TouchableOpacity>
+      {error ? <Text className="text-[15px] text-muted mb-4 px-1">{error}</Text> : null}
 
-          <View className="bg-white border border-slate-200 rounded-2xl px-4 h-[52px] flex-row items-center mt-4">
-            <Search size={18} color={colors.subtle} />
-            <TextInput
-              value={query}
-              onChangeText={setQuery}
-              placeholder="Search a city, like New York"
-              placeholderTextColor={colors.subtle}
-              autoCapitalize="words"
-              autoCorrect={false}
-              className="flex-1 ml-2 text-base text-ink"
-            />
-            {isSearching && <ActivityIndicator size="small" color={colors.primary} />}
-          </View>
-        </View>
-
-        <ScrollView contentContainerStyle={{ paddingHorizontal: 20, paddingTop: 12, paddingBottom: 32 }} keyboardShouldPersistTaps="handled">
-          {error ? <Text className="text-slate-500">{error}</Text> : null}
+      {results.length > 0 ? (
+        <ListGroup title="Results">
           {results.map((result) => {
             const label = placeLabel(result);
             return (
-              <TouchableOpacity
+              <ListRow
                 key={result.place_id}
+                icon={MapPin}
+                title={label}
+                subtitle={result.display_name}
                 onPress={() => onPlace({
                   label,
                   latitude: Number(result.lat),
                   longitude: Number(result.lon),
                 })}
-                className="bg-white border border-slate-200 rounded-2xl px-4 py-3 mb-2 flex-row items-center"
-              >
-                <MapPin size={16} color={colors.muted} />
-                <View className="ml-3 flex-1">
-                  <Text className="font-bold text-ink" numberOfLines={1}>{label}</Text>
-                  <Text className="text-[13px] text-slate-500 mt-0.5" numberOfLines={1}>{result.display_name}</Text>
-                </View>
-              </TouchableOpacity>
+              />
             );
           })}
-        </ScrollView>
-      </SafeAreaView>
-    </Modal>
+        </ListGroup>
+      ) : (
+        <ListGroup>
+          <ListRow icon={LocateFixed} iconColor={colors.primary} title="Near you" subtitle="Use this phone's location again." onPress={onNearYou} />
+          <ListRow icon={Globe} iconColor={colors.primary} title="Anywhere" subtitle="Turn the distance filter off for this visit." onPress={onAnywhere} />
+        </ListGroup>
+      )}
+    </Sheet>
   );
 }

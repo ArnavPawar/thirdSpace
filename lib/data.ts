@@ -158,6 +158,8 @@ const localState = {
 const PHOTO_BUCKET = 'review-photos';
 const PHOTO_MAX_EDGE = 1600;
 const PHOTO_QUALITY = 0.7;
+const AVATAR_BUCKET = 'avatars';
+const AVATAR_EDGE = 512;
 
 const eventCache = new Map<string, CalendarOccurrence[]>();
 
@@ -1034,7 +1036,7 @@ export async function updateProfile(userId: string, update: Partial<Profile>): P
         user_id: userId,
         username: update.username,
         full_name: update.full_name,
-        avatar_url: update.avatar_url,
+        avatar_url: update.avatar_url === '' ? null : update.avatar_url,
         bio: update.bio,
         location: update.location,
         vibe_title: update.vibe_title,
@@ -1048,6 +1050,25 @@ export async function updateProfile(userId: string, update: Partial<Profile>): P
 
 export async function setVibeTitle(userId: string, vibeTitle: string): Promise<ProfileWithStats> {
   return updateProfile(userId, { vibe_title: vibeTitle });
+}
+
+/** Uploads a square profile photo and returns the URL to store in `avatar_url`. */
+export async function uploadAvatar(userId: string, photo: LocalPhoto): Promise<string> {
+  const context = ImageManipulator.manipulate(photo.uri);
+  context.resize({ width: AVATAR_EDGE, height: AVATAR_EDGE });
+  const image = await context.renderAsync();
+  const result = await image.saveAsync({ compress: PHOTO_QUALITY, format: SaveFormat.JPEG });
+
+  if (!canUseUserScopedRemote(userId)) return result.uri;
+
+  const body = await (await fetch(result.uri)).arrayBuffer();
+  const storagePath = `${userId}/${Date.now()}.jpg`;
+  const { error } = await supabase.storage
+    .from(AVATAR_BUCKET)
+    .upload(storagePath, body, { contentType: 'image/jpeg', upsert: true });
+  if (error) throw error;
+
+  return supabase.storage.from(AVATAR_BUCKET).getPublicUrl(storagePath).data.publicUrl;
 }
 
 export async function listUserRatingHistory(userId: string): Promise<RatingHistoryEntry[]> {

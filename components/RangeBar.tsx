@@ -1,14 +1,14 @@
 import React, { useMemo, useState } from 'react';
 import { PanResponder, Pressable, Text, View } from 'react-native';
 import { MapPin } from 'lucide-react-native';
-import { colors } from '@/lib/theme';
+import { useColors } from '@/lib/theme';
 
 export const RANGE_STOPS = [1, 3, 5, 10, 25] as const;
 export const MIN_RANGE_MILES = RANGE_STOPS[0];
 export const MAX_RANGE_MILES = RANGE_STOPS[RANGE_STOPS.length - 1];
 
 const THUMB_SIZE = 24;
-const TRACK_HEIGHT = 8;
+const TRACK_HEIGHT = 4;
 const LABEL_WIDTH = 44;
 const SEGMENTS = RANGE_STOPS.length - 1;
 
@@ -36,6 +36,7 @@ interface RangeBarProps {
 }
 
 export default function RangeBar({ value, onChange, onDraggingChange, eventCount }: RangeBarProps) {
+  const colors = useColors();
   const [trackWidth, setTrackWidth] = useState(0);
   const [dragFraction, setDragFraction] = useState<number | null>(null);
   const panResponder = useMemo(() => {
@@ -72,14 +73,14 @@ export default function RangeBar({ value, onChange, onDraggingChange, eventCount
   const thumbLeft = fraction * trackWidth - THUMB_SIZE / 2;
 
   return (
-    <View className="bg-white rounded-3xl border border-slate-200 px-5 pt-3.5 pb-3">
+    <View className="bg-surface rounded-2xl px-4 pt-3.5 pb-3">
       <View className="flex-row items-center justify-between mb-1">
         <View className="flex-row items-center">
-          <MapPin size={15} color={colors.primary} />
-          <Text className="text-[15px] font-bold text-ink ml-1.5">Within {displayMiles} mi</Text>
+          <MapPin size={16} color={colors.muted} />
+          <Text className="text-[15px] font-semibold text-ink ml-1.5">Within {displayMiles} mi</Text>
         </View>
         {eventCount !== undefined && (
-          <Text className="text-[13px] font-semibold text-slate-500">
+          <Text className="text-[13px] text-muted">
             {eventCount === 1 ? '1 event' : `${eventCount} events`} this month
           </Text>
         )}
@@ -99,7 +100,7 @@ export default function RangeBar({ value, onChange, onDraggingChange, eventCount
         }}
         style={{ height: THUMB_SIZE + 16, justifyContent: 'center' }}
       >
-        <View pointerEvents="none" style={{ height: TRACK_HEIGHT, borderRadius: TRACK_HEIGHT / 2 }} className="bg-slate-200" />
+        <View pointerEvents="none" style={{ height: TRACK_HEIGHT, borderRadius: TRACK_HEIGHT / 2 }} className="bg-fill" />
         <View
           pointerEvents="none"
           style={{
@@ -120,11 +121,11 @@ export default function RangeBar({ value, onChange, onDraggingChange, eventCount
               width: THUMB_SIZE,
               height: THUMB_SIZE,
               borderRadius: THUMB_SIZE / 2,
-              backgroundColor: 'white',
-              borderWidth: 3,
-              borderColor: colors.primary,
-              shadowColor: colors.ink,
-              shadowOpacity: 0.15,
+              backgroundColor: '#ffffff',
+              borderWidth: 0.5,
+              borderColor: colors.line,
+              shadowColor: '#000000',
+              shadowOpacity: 0.2,
               shadowRadius: 4,
               shadowOffset: { width: 0, height: 1 },
               elevation: 3,
@@ -146,7 +147,7 @@ export default function RangeBar({ value, onChange, onDraggingChange, eventCount
               hitSlop={{ top: 8, bottom: 8 }}
               style={{ position: 'absolute', left: (index / SEGMENTS) * trackWidth - LABEL_WIDTH / 2, width: LABEL_WIDTH }}
             >
-              <Text style={{ color: isActive ? colors.primary : colors.subtle }} className="text-[12px] font-bold text-center">
+              <Text style={{ color: isActive ? colors.ink : colors.subtle }} className={`text-[12px] text-center ${isActive ? 'font-semibold' : 'font-medium'}`}>
                 {stop} mi
               </Text>
             </Pressable>

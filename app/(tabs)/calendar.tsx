@@ -12,7 +12,7 @@ import { Chip, EmptyState, ScreenHeader, SectionTitle } from '@/components/ui';
 import { useAuth } from '@/lib/auth';
 import { listEventsNearby } from '@/lib/data';
 import { eventOrigin, parseDateKey, toDateKey, type EventOrigin } from '@/lib/events';
-import { colors } from '@/lib/theme';
+import { useColors } from '@/lib/theme';
 import type { CalendarOccurrence, SpaceCategory } from '@/types/space';
 
 const ARLINGTON = { latitude: 38.8816, longitude: -77.1081 };
@@ -35,6 +35,7 @@ const eventIdentity = (occurrence: CalendarOccurrence) =>
     : `${occurrence.event.space_id}|${occurrence.event.title}|${occurrence.event.kind === 'weekly' ? `w${occurrence.event.weekday}` : occurrence.date}`;
 
 export default function CalendarScreen() {
+  const colors = useColors();
   const { userId } = useAuth();
   const [monthStart, setMonthStart] = useState(() => firstOfMonth(new Date()));
   const [selectedDate, setSelectedDate] = useState<string | null>(null);
@@ -255,11 +256,11 @@ export default function CalendarScreen() {
   const nextWiderRadius = RANGE_STOPS.find((stop) => stop > radius);
 
   return (
-    <SafeAreaView edges={['top']} className="flex-1 bg-slate-50">
+    <SafeAreaView edges={['top']} className="flex-1 bg-canvas">
       <ScrollView
         scrollEnabled={!isDraggingRange}
         contentContainerStyle={{ paddingBottom: 40 }}
-        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.primary} />}
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.muted} />}
       >
         <ScreenHeader
           title="Calendar"
@@ -268,11 +269,11 @@ export default function CalendarScreen() {
             <Pressable
               onPress={() => router.push('/event/new' as never)}
               accessibilityRole="button"
-              accessibilityLabel="Create event"
-              className="bg-primary rounded-full px-4 h-11 flex-row items-center"
+              accessibilityLabel="Host an event"
+              className="bg-primary rounded-full pl-3 pr-4 h-10 flex-row items-center"
             >
-              <Plus size={16} color="white" />
-              <Text className="text-white font-bold ml-1.5">Create</Text>
+              <Plus size={18} color={colors.onPrimary} />
+              <Text className="text-white font-semibold text-[15px] ml-1">Host</Text>
             </Pressable>
           )}
         />
@@ -282,10 +283,10 @@ export default function CalendarScreen() {
             onPress={() => setShowPlaceSheet(true)}
             accessibilityRole="button"
             accessibilityLabel={`Calendar place, ${placeLabel}`}
-            className="self-start flex-row items-center bg-white border border-slate-200 rounded-full px-3 h-10"
+            className="self-start flex-row items-center bg-surface rounded-full pl-3 pr-2.5 h-9"
           >
-            <MapPin size={15} color={colors.primary} />
-            <Text className="font-semibold text-ink ml-1.5">{placeLabel}</Text>
+            <MapPin size={15} color={colors.ink} />
+            <Text className="font-medium text-ink text-[15px] mx-1.5">{placeLabel}</Text>
             <ChevronDown size={16} color={colors.muted} />
           </Pressable>
           <RangeBar
@@ -320,7 +321,7 @@ export default function CalendarScreen() {
 
         {isLoading ? (
           <View className="py-16 items-center">
-            <ActivityIndicator color={colors.primary} />
+            <ActivityIndicator color={colors.muted} />
           </View>
         ) : allOccurrences.length > 0 && occurrences.length === 0 ? (
           <View className="px-4 mt-5">
@@ -364,7 +365,7 @@ export default function CalendarScreen() {
               onAction={selectedDate ? () => setSelectedDate(null) : undefined}
             />
             {agenda.items.length === 0 ? (
-              <Text className="text-slate-500 mb-2">{agenda.empty}</Text>
+              <Text className="text-[15px] text-muted mb-2">{agenda.empty}</Text>
             ) : (
               <View className="gap-3">
                 {agenda.items.map((occurrence) => (
@@ -382,11 +383,11 @@ export default function CalendarScreen() {
                   className="flex-row items-center justify-between mb-3"
                 >
                   <View className="flex-row items-center">
-                    <Repeat size={16} color={colors.primary} />
-                    <Text className="text-[17px] font-bold text-ink ml-2">
+                    <Repeat size={16} color={colors.muted} />
+                    <Text className="text-[18px] font-semibold text-ink ml-2">
                       {anywhere ? 'Every week' : place ? `Every week around ${place.label}` : 'Every week nearby'}
                     </Text>
-                    <Text className="text-[13px] font-semibold text-slate-400 ml-2">{weeklyEvents.length}</Text>
+                    <Text className="text-[15px] text-subtle ml-2">{weeklyEvents.length}</Text>
                   </View>
                   {showWeekly ? <ChevronUp size={18} color={colors.muted} /> : <ChevronDown size={18} color={colors.muted} />}
                 </Pressable>
