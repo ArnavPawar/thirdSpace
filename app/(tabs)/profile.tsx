@@ -15,6 +15,8 @@ import {
   TrendingUp,
   UsersRound,
 } from 'lucide-react-native';
+import LeaderboardSheet from '@/components/LeaderboardSheet';
+import ProfileStatsCard from '@/components/ProfileStatsCard';
 import SpaceCard from '@/components/SpaceCard';
 import VibeSheet from '@/components/VibeSheet';
 import {
@@ -56,6 +58,7 @@ import { CATEGORY_META, useColors, withAlpha } from '@/lib/theme';
 import type {
   CategoryPurpose,
   IncomingInvite,
+  LeaderboardKind,
   Profile,
   RatingHistoryEntry,
   SecretSpotPreview,
@@ -82,6 +85,7 @@ export default function ProfileScreen() {
   const [socialModalType, setSocialModalType] = useState<'followers' | 'following' | null>(null);
   const [socialProfiles, setSocialProfiles] = useState<Profile[]>([]);
   const [showVibeSheet, setShowVibeSheet] = useState(false);
+  const [boardKind, setBoardKind] = useState<LeaderboardKind | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
 
@@ -357,6 +361,10 @@ export default function ProfileScreen() {
               <Text className="text-[13px] text-muted mt-3">You've unlocked every milestone. Legend status.</Text>
             )}
           </TouchableOpacity>
+
+          <View className="mt-3">
+            <ProfileStatsCard stats={profile.stats} onOpenBoard={setBoardKind} />
+          </View>
         </View>
 
         <View className="mx-4 mt-6">
@@ -562,6 +570,15 @@ export default function ProfileScreen() {
         progress={progress}
         identity={identity}
         onSelectTitle={handleSelectTitle}
+      />
+
+      <LeaderboardSheet
+        kind={boardKind}
+        onChangeKind={setBoardKind}
+        onClose={() => setBoardKind(null)}
+        ownerId={userId}
+        ownerFirstName={displayName.split(' ')[0]}
+        viewerId={userId}
       />
 
       <Sheet

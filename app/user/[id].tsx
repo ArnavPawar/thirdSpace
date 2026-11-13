@@ -4,12 +4,14 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { router, useFocusEffect, useLocalSearchParams } from 'expo-router';
 import { MapPin, MessageCircle, UserCheck, UserPlus, UserX } from 'lucide-react-native';
 import FeedCard from '@/components/FeedCard';
+import LeaderboardSheet from '@/components/LeaderboardSheet';
+import ProfileStatsCard from '@/components/ProfileStatsCard';
 import { Avatar, EmptyState, PrimaryButton, VibeTitleChip } from '@/components/ui';
 import { useAuth } from '@/lib/auth';
 import { getPublicProfile, listRecentActivity, toggleFollow } from '@/lib/data';
 import { getDisplayName } from '@/lib/format';
 import { useColors } from '@/lib/theme';
-import type { FeedActivity, ProfileWithStats } from '@/types/space';
+import type { FeedActivity, LeaderboardKind, ProfileWithStats } from '@/types/space';
 
 export default function UserProfileScreen() {
   const colors = useColors();
@@ -17,6 +19,7 @@ export default function UserProfileScreen() {
   const { userId } = useAuth();
   const [profile, setProfile] = useState<ProfileWithStats | null>(null);
   const [reviews, setReviews] = useState<FeedActivity[]>([]);
+  const [boardKind, setBoardKind] = useState<LeaderboardKind | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
 
@@ -141,6 +144,10 @@ export default function UserProfileScreen() {
               />
             </View>
 
+            <View className="mt-5">
+              <ProfileStatsCard stats={profile.stats} onOpenBoard={setBoardKind} />
+            </View>
+
             <View className="flex-row items-baseline mt-8">
               <Text className="text-[18px] font-semibold text-ink flex-1">Reviews</Text>
               <Text className="text-[15px] text-muted">{reviews.length}</Text>
@@ -155,6 +162,15 @@ export default function UserProfileScreen() {
             body={`When ${firstName} rates a spot, it'll show up here.`}
           />
         }
+      />
+
+      <LeaderboardSheet
+        kind={boardKind}
+        onChangeKind={setBoardKind}
+        onClose={() => setBoardKind(null)}
+        ownerId={profile.user_id}
+        ownerFirstName={firstName}
+        viewerId={userId}
       />
     </SafeAreaView>
   );

@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { ActivityIndicator, Text, TextInput, View } from 'react-native';
 import { Globe, LocateFixed, MapPin, Search } from 'lucide-react-native';
 import { ListGroup, ListRow, Sheet } from '@/components/ui';
+import { localityName, type NominatimAddress } from '@/lib/cities';
 import { useColors, useColorSchemeName } from '@/lib/theme';
 
 export interface CalendarPlace {
@@ -16,13 +17,7 @@ interface NominatimResult {
   lat: string;
   lon: string;
   name?: string;
-  address?: {
-    city?: string;
-    town?: string;
-    village?: string;
-    hamlet?: string;
-    municipality?: string;
-  };
+  address?: NominatimAddress;
 }
 
 const NOMINATIM_HEADERS = {
@@ -30,17 +25,11 @@ const NOMINATIM_HEADERS = {
   'User-Agent': 'ThirdSpaceExpoApp/1.0',
 };
 
-const placeLabel = (result: NominatimResult) => {
-  const address = result.address;
-  return address?.city
-    || address?.town
-    || address?.village
-    || address?.municipality
-    || address?.hamlet
+const placeLabel = (result: NominatimResult) =>
+  localityName(result.address)
     || result.name
     || result.display_name.split(',')[0]
     || 'Selected place';
-};
 
 export default function PlaceLensSheet({
   visible,

@@ -37,6 +37,7 @@ import PhotoPickerRow from '@/components/PhotoPickerRow';
 import VibeSlider from '@/components/VibeSlider';
 import { Avatar, CategoryIcon, Chip, EmptyState, PrimaryButton, ProgressBar, ScorePill, Sheet } from '@/components/ui';
 import { useAuth } from '@/lib/auth';
+import { cityFromAddress, type NominatimAddress } from '@/lib/cities';
 import { getProfile, listMyGroups, listSecretSpots, listSocialProfiles, listSpaces, submitRating } from '@/lib/data';
 import { formatDistance, getDisplayName } from '@/lib/format';
 import { openProfile } from '@/lib/links';
@@ -68,6 +69,7 @@ interface NominatimSearchResult {
   lat: string;
   lon: string;
   name?: string;
+  address?: NominatimAddress;
 }
 
 type PlaceSuggestion = NominatimSearchResult & { distance: number; isFar: boolean };
@@ -78,6 +80,7 @@ const NEARBY_RADIUS_MILES = 15;
 interface NominatimReverseResult {
   display_name?: string;
   name?: string;
+  address?: NominatimAddress;
 }
 
 type Step = 0 | 1 | 2;
@@ -233,7 +236,7 @@ export default function RateScreen() {
         const origin = userCoordinate || mapCenterRef.current;
         const fetchPlaces = async (bounded: boolean, limit: number) => {
           const response = await fetch(
-            'https://nominatim.openstreetmap.org/search?format=json'
+            'https://nominatim.openstreetmap.org/search?format=json&addressdetails=1'
               + `&limit=${limit}&viewbox=${buildViewbox(origin, NEARBY_RADIUS_MILES)}&bounded=${bounded ? 1 : 0}`
               + `&q=${encodeURIComponent(trimmedQuery)}`,
             { headers: NOMINATIM_HEADERS, signal: abortController.signal }
@@ -285,7 +288,7 @@ export default function RateScreen() {
     ).slice(0, 3);
   }, [knownSpaces, searchQuery, selectedSpace?.name, userCoordinate]);
 
-  const buildDraftSpace = (name: string, address: string, coordinate: LatLng): ThirdSpace => {
+  const buildDraftSpace = (name: string, address: string, coordinate: LatLng, city?: string): ThirdSpace => {
     const timestamp = new Date().toISOString();
     return {
       id: `draft-${coordinate.latitude.toFixed(5)}-${coordinate.longitude.toFixed(5)}`,
@@ -293,6 +296,7 @@ export default function RateScreen() {
       category: ratings.category,
       primary_purpose: ratings.primary_purpose,
       address,
+      city,
       latitude: coordinate.latitude,
       longitude: coordinate.longitude,
       created_at: timestamp,
@@ -309,7 +313,7 @@ export default function RateScreen() {
     const coordinate = { latitude: Number(suggestion.lat), longitude: Number(suggestion.lon) };
     const name = suggestion.name || suggestion.display_name.split(',')[0] || 'Selected Location';
 
-    selectDraftSpace(buildDraftSpace(name, suggestion.display_name, coordinate));
+    selectDraftSpace(buildDraftSpace(name, suggestion.display_name, coordinate, cityFromAddress(suggestion.address)));
     setPinCoordinate(coordinate);
     mapRef.current?.animateToRegion({ ...coordinate, latitudeDelta: 0.012, longitudeDelta: 0.008 }, 300);
     setSearchQuery(name);
@@ -331,7 +335,7 @@ export default function RateScreen() {
       const address = place.display_name || `${coordinate.latitude.toFixed(5)}, ${coordinate.longitude.toFixed(5)}`;
       const name = place.name || address.split(',')[0] || 'Dropped Pin';
 
-      selectDraftSpace(buildDraftSpace(name, address, coordinate));
+      selectDraftSpace(buildDraftSpace(name, address, coordinate, cityFromAddress(place.address)));
       setSearchQuery(name);
     } catch {
       selectDraftSpace(buildDraftSpace('Dropped Pin', `${coordinate.latitude.toFixed(5)}, ${coordinate.longitude.toFixed(5)}`, coordinate));

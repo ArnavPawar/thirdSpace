@@ -26,9 +26,14 @@ import {
   type GroupVisibility,
   type IncomingInvite,
   type InviteStatus,
+  type Leaderboard,
+  type LeaderboardEntry,
+  type LeaderboardKind,
+  type LeaderboardPosition,
   MAX_EVENT_MESSAGE_LENGTH,
   type LocalPhoto,
   type Profile,
+  type ProfileStats,
   type ProfileWithStats,
   type RatingHistoryEntry,
   type RsvpStatus,
@@ -51,6 +56,8 @@ import {
   demoCrowdProfiles,
   demoCurrentUserId,
   demoFeed,
+  demoLeaderboardCity,
+  demoLeaderboards,
   demoPhotos,
   demoProfile,
   demoProfiles,
@@ -188,6 +195,7 @@ const mapSpaceRow = (row: Record<string, unknown>): SpaceWithAttributes => ({
   category: row.category as SpaceCategory,
   primary_purpose: row.primary_purpose as CategoryPurpose | undefined,
   address: String(row.address),
+  city: (row.city as string | null) || undefined,
   latitude: Number(row.latitude),
   longitude: Number(row.longitude),
   description: (row.description as string | null) || undefined,
@@ -238,6 +246,44 @@ const mapProfileRow = (row: Record<string, unknown>): Profile => ({
   updated_at: String(row.updated_at),
 });
 
+const EMPTY_STATS: ProfileStats = {
+  spaces_rated: 0,
+  reviews_written: 0,
+  likes_received: 0,
+  categories_explored: 0,
+  cities_explored: 0,
+  hosted: 0,
+  attended: 0,
+  guests: 0,
+  followers: 0,
+  following: 0,
+  ranks: {},
+};
+
+const demoBoardScores = (kind: LeaderboardKind) => {
+  const sessionRatings = kind === 'rankers' ? localState.sessionRatings[demoCurrentUserId] || 0 : 0;
+  const scores = demoLeaderboards[kind].scores
+    .map((row) => row.user_id === demoCurrentUserId ? { ...row, score: row.score + sessionRatings } : row)
+    .sort((first, second) => second.score - first.score);
+  return scores.map((row) => ({ ...row, rank: 1 + scores.filter((other) => other.score > row.score).length }));
+};
+
+const demoBoardPosition = (kind: LeaderboardKind): LeaderboardPosition | undefined => {
+  const mine = demoBoardScores(kind).find((row) => row.user_id === demoCurrentUserId);
+  return mine && { scope: 'city', city: demoLeaderboardCity, rank: mine.rank, total: demoLeaderboards[kind].total };
+};
+
+const getDemoLeaderboard = (kind: LeaderboardKind): Leaderboard => ({
+  kind,
+  scope: 'city',
+  city: demoLeaderboardCity,
+  total: demoLeaderboards[kind].total,
+  entries: demoBoardScores(kind).slice(0, 10).flatMap((row): LeaderboardEntry[] => {
+    const profile = findLocalProfile(row.user_id);
+    return profile ? [{ rank: row.rank, score: row.score, profile }] : [];
+  }),
+});
+
 const getDemoProfile = (userId: string): ProfileWithStats => {
   const storedProfile = findLocalProfile(userId);
   const sessionRatings = localState.sessionRatings[userId] || 0;
@@ -250,6 +296,7 @@ const getDemoProfile = (userId: string): ProfileWithStats => {
       reviews_written: demoProfile.stats.reviews_written + sessionRatings,
       followers: localState.profiles.filter((profile) => profile.user_id !== userId).length,
       following: localState.following.size,
+      ranks: { rankers: demoBoardPosition('rankers'), hosts: demoBoardPosition('hosts') },
     },
   };
 };
@@ -753,6 +800,7 @@ export async function submitRating(userId: string, input: SubmitRatingInput): Pr
       category,
       primary_purpose: primaryPurpose,
       address: input.space.address,
+      city: input.space.city,
       latitude: input.space.latitude,
       longitude: input.space.longitude,
       description: input.space.description,
@@ -831,6 +879,7 @@ export async function submitRating(userId: string, input: SubmitRatingInput): Pr
     category,
     primary_purpose: primaryPurpose,
     address: input.space.address,
+    city: input.space.city,
     latitude: input.space.latitude,
     longitude: input.space.longitude,
     description: input.space.description,
@@ -942,32 +991,89 @@ export async function submitRating(userId: string, input: SubmitRatingInput): Pr
   return { failedPhotos, failedTags };
 }
 
-async function fetchRemoteProfileWithStats(userId: string): Promise<ProfileWithStats | null> {
-  const { data, error } = await supabase.from('profiles').select('*').eq('user_id', userId).single();
-  if (error) return null;
+const mapLeaderboardPosition = (value: unknown): LeaderboardPosition | undefined => {
+  if (!value || typeof value !== 'object') return undefined;
+  const row = value as Record<string, unknown>;
+  return {
+    scope: row.scope === 'city' ? 'city' : 'friends',
+    city: (row.city as string | null) || undefined,
+    rank: Number(row.rank),
+    total: Number(row.total),
+  };
+};
 
-  const [
-    { count: spacesRated },
-    { count: reviewsWritten },
-    { count: followers },
-    { count: following },
-  ] = await Promise.all([
-    supabase.from('ratings').select('space_id', { count: 'exact', head: true }).eq('user_id', userId),
-    supabase.from('ratings').select('id', { count: 'exact', head: true }).eq('user_id', userId).not('review_text', 'is', null),
-    supabase.from('follows').select('follower_id', { count: 'exact', head: true }).eq('following_id', userId),
-    supabase.from('follows').select('following_id', { count: 'exact', head: true }).eq('follower_id', userId),
+const mapStatsRow = (row: Record<string, unknown>): ProfileStats => {
+  const count = (key: Exclude<keyof ProfileStats, 'ranks'>) => Number(row[key]) || 0;
+  const ranks = (row.ranks || {}) as Record<string, unknown>;
+  return {
+    spaces_rated: count('spaces_rated'),
+    reviews_written: count('reviews_written'),
+    likes_received: count('likes_received'),
+    categories_explored: count('categories_explored'),
+    cities_explored: count('cities_explored'),
+    hosted: count('hosted'),
+    attended: count('attended'),
+    guests: count('guests'),
+    followers: count('followers'),
+    following: count('following'),
+    ranks: { rankers: mapLeaderboardPosition(ranks.rankers), hosts: mapLeaderboardPosition(ranks.hosts) },
+  };
+};
+
+async function fetchRemoteProfileWithStats(userId: string): Promise<ProfileWithStats | null> {
+  const [{ data, error }, { data: stats, error: statsError }] = await Promise.all([
+    supabase.from('profiles').select('*').eq('user_id', userId).single(),
+    supabase.rpc('get_profile_stats', { target_user: userId }),
   ]);
+  if (error) return null;
+  if (statsError) console.warn('Profile stats unavailable. Has supabase/profile-stats.sql been run?', statsError.message);
 
   return {
     ...mapProfileRow(data as unknown as Record<string, unknown>),
-    stats: {
-      spaces_rated: spacesRated || 0,
-      reviews_written: reviewsWritten || 0,
-      helpful_votes: 0,
-      rank_in_area: 0,
-      followers: followers || 0,
-      following: following || 0,
-    },
+    stats: stats ? mapStatsRow(stats as Record<string, unknown>) : EMPTY_STATS,
+  };
+}
+
+// Mirrors get_profile_stats in profile-stats.sql for demo hangouts.
+function localEventStats(userId: string): Pick<ProfileStats, 'hosted' | 'attended' | 'guests'> {
+  seedDemoHosted();
+  const today = toDateKey(new Date());
+  const hostedEvents = localState.hostedEvents || [];
+  const hosted = hostedEvents.filter((event) =>
+    event.host_user_id === userId && !event.cancelled_at && event.event_date && event.event_date <= today
+  );
+  const hostedIds = new Set(hosted.map((event) => event.id));
+  const skipped = new Set(hostedEvents.filter((event) => event.cancelled_at || event.host_user_id === userId).map((event) => event.id));
+  const slot = (row: PresenceRow) => `${row.event_id}|${row.occurrence_date}`;
+  const going = localState.rsvps.filter((row) => row.status === 'going');
+
+  const went = new Set([
+    ...localState.checkins.filter((row) => row.user_id === userId),
+    ...going.filter((row) => row.user_id === userId && row.occurrence_date <= today),
+  ].filter((row) => !skipped.has(row.event_id)).map(slot));
+  const guests = new Set([...going, ...localState.checkins]
+    .filter((row) => hostedIds.has(row.event_id) && row.user_id !== userId)
+    .map((row) => `${slot(row)}|${row.user_id}`));
+
+  return { hosted: hosted.length, attended: went.size, guests: guests.size };
+}
+
+export async function getLeaderboard(targetUserId: string, kind: LeaderboardKind): Promise<Leaderboard> {
+  if (!isSupabaseConfigured || !supabase || !isUuid(targetUserId)) return getDemoLeaderboard(kind);
+
+  const { data, error } = await supabase.rpc('get_leaderboard', { target_user: targetUserId, board: kind });
+  if (error) throw error;
+  const row = (data || {}) as Record<string, unknown>;
+  return {
+    kind,
+    scope: row.scope === 'city' ? 'city' : 'friends',
+    city: (row.city as string | null) || undefined,
+    total: Number(row.total) || 0,
+    entries: ((row.entries || []) as Record<string, unknown>[]).flatMap((entry): LeaderboardEntry[] =>
+      entry.profile
+        ? [{ rank: Number(entry.rank), score: Number(entry.score), profile: mapProfileRow(entry.profile as Record<string, unknown>) }]
+        : []
+    ),
   };
 }
 
@@ -1001,10 +1107,13 @@ export async function getPublicProfile(targetUserId: string, viewerId: string): 
     ...localProfile,
     is_following: isFollowing,
     stats: {
+      ...EMPTY_STATS,
       spaces_rated: new Set(ratings.map((activity) => activity.space_id)).size,
       reviews_written: ratings.filter((activity) => activity.review_text).length,
-      helpful_votes: ratings.reduce((total, activity) => total + (activity.likes_count || 0), 0),
-      rank_in_area: 0,
+      likes_received: ratings.reduce((total, activity) => total + (activity.likes_count || 0), 0),
+      categories_explored: new Set(ratings.map((activity) => activity.category)).size,
+      cities_explored: new Set(ratings.map((activity) => activity.space.city).filter(Boolean)).size,
+      ...localEventStats(targetUserId),
       followers: isFollowing ? 1 : 0,
       following: 0,
     },
@@ -2347,6 +2456,7 @@ async function resolveEventSpace(userId: string, input: CreateHostedEventInput):
       category: input.space.category,
       primary_purpose: purpose,
       address: input.space.address,
+      city: input.space.city,
       latitude: input.space.latitude,
       longitude: input.space.longitude,
       is_secret: false,
@@ -2376,6 +2486,7 @@ async function resolveEventSpace(userId: string, input: CreateHostedEventInput):
     category: input.space.category,
     primary_purpose: purpose,
     address: input.space.address,
+    city: input.space.city,
     latitude: input.space.latitude,
     longitude: input.space.longitude,
     is_secret: false,

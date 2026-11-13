@@ -344,6 +344,8 @@ export interface ThirdSpace {
   category: SpaceCategory;
   primary_purpose?: CategoryPurpose;
   address: string;
+  /** "Arlington, VA". Which city leaderboard a rating or hangout here counts toward. */
+  city?: string;
   latitude: number;
   longitude: number;
   description?: string;
@@ -457,13 +459,51 @@ export interface FeedActivity extends UserRating {
   groups?: ReviewGroupTag[];
 }
 
+/** rankers: most spots rated. hosts: most hangouts hosted. */
+export type LeaderboardKind = 'rankers' | 'hosts';
+/** A city board once enough people there are on it, otherwise the person and everyone they follow. */
+export type LeaderboardScope = 'city' | 'friends';
+
+export interface LeaderboardPosition {
+  scope: LeaderboardScope;
+  /** "Arlington, VA". Only set on city boards. */
+  city?: string;
+  rank: number;
+  total: number;
+}
+
+export interface LeaderboardEntry {
+  rank: number;
+  score: number;
+  profile: Profile;
+}
+
+export interface Leaderboard {
+  kind: LeaderboardKind;
+  scope: LeaderboardScope;
+  city?: string;
+  total: number;
+  /** The top 10, plus the profile owner at the end if they're further down. */
+  entries: LeaderboardEntry[];
+}
+
 export interface ProfileStats {
+  /** Distinct spots rated. Drives Vibe milestones. */
   spaces_rated: number;
   reviews_written: number;
-  helpful_votes: number;
-  rank_in_area: number;
+  likes_received: number;
+  categories_explored: number;
+  cities_explored: number;
+  /** Hangouts hosted that weren't cancelled and whose day has come. */
+  hosted: number;
+  /** Check-ins plus "going" RSVPs once the day has come, once per occurrence, not counting their own hangouts. */
+  attended: number;
+  /** Everyone else who RSVPed going or checked in to a hangout they hosted. */
+  guests: number;
   followers: number;
   following: number;
+  /** Missing when there's no one to rank against yet. */
+  ranks: Partial<Record<LeaderboardKind, LeaderboardPosition>>;
 }
 
 export interface ProfileWithStats extends Profile {
@@ -484,7 +524,7 @@ export interface RatingFormData {
 
 export interface SubmitRatingInput {
   space: Pick<ThirdSpace, 'name' | 'address' | 'latitude' | 'longitude'> &
-    Partial<Pick<ThirdSpace, 'id' | 'description' | 'website' | 'phone' | 'hours'>>;
+    Partial<Pick<ThirdSpace, 'id' | 'city' | 'description' | 'website' | 'phone' | 'hours'>>;
   rating: RatingFormData;
   secret?: { area_hint?: string };
   photos?: LocalPhoto[];
@@ -615,6 +655,7 @@ export interface CreateHostedEventInput {
   existingSpace: boolean;
   space: Pick<ThirdSpace, 'id' | 'name' | 'category' | 'address' | 'latitude' | 'longitude'> & {
     primary_purpose?: CategoryPurpose;
+    city?: string;
   };
 }
 
