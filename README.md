@@ -45,10 +45,11 @@ npm install
 9. Run `supabase/groups.sql` for crews: public and private groups, posting a hangout to a group, and in-app invites. If you re-run `hosted-events.sql` later, run `groups.sql` again
 10. Run `supabase/review-tags.sql` so a review can say which friends or groups you were with. A group's feed then shows those reviews, not every member's posts
 11. Run `supabase/avatars.sql` so people can upload a profile picture from their camera roll. Preset icon avatars work without it
-12. In Authentication → URL Configuration, add `thirdspace://**` and `exp://**` to Redirect URLs
-13. Update your `.env` file with the project URL and anon key
-14. Optional: sign in to the app once, then run `supabase/seed-demo-events.sql` for demo hangouts, private invites with RSVP caps, duplicate trivia/run club reviews, and fake headcounts. The most recently created non-demo profile is used as "you". It's safe to re-run
-15. Optional: run `supabase/seed-demo-groups.sql` after `groups.sql` and `seed-demo-social.sql`. Then `nina.nights@example.com` / `password123` owns Arlington girls, belongs to the private Company hangout, can discover Rosslyn run club, and has Emma's Picnic crew invite on Profile
+12. Run `supabase/profile-stats.sql` for profile stats (hosted, went to, guests) and the city leaderboards for top rankers and hosts. The app saves a city with every new spot, so run this before shipping a build. To give older spots a city, set `SUPABASE_SERVICE_ROLE_KEY` in `.env` and run `npm run backfill:cities`
+13. In Authentication → URL Configuration, add `thirdspace://**` and `exp://**` to Redirect URLs
+14. Update your `.env` file with the project URL and anon key
+15. Optional: sign in to the app once, then run `supabase/seed-demo-events.sql` for demo hangouts, private invites with RSVP caps, duplicate trivia/run club reviews, and fake headcounts. The most recently created non-demo profile is used as "you". It's safe to re-run
+16. Optional: run `supabase/seed-demo-groups.sql` after `groups.sql` and `seed-demo-social.sql`. Then `nina.nights@example.com` / `password123` owns Arlington girls, belongs to the private Company hangout, can discover Rosslyn run club, and has Emma's Picnic crew invite on Profile
 
 ### 4. Run the App
 

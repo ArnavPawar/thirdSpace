@@ -11,7 +11,8 @@
     "lint": "expo lint",
     "type-check": "tsc --noEmit",
     "test": "npm run type-check",
-    "backfill:events": "npx --yes tsx --env-file=.env scripts/backfill-events.ts"
+    "backfill:events": "npx --yes tsx --env-file=.env scripts/backfill-events.ts",
+    "backfill:cities": "npx --yes tsx --env-file=.env scripts/backfill-space-cities.ts"
   },
   "dependencies": {
     "@react-native-async-storage/async-storage": "2.2.0",

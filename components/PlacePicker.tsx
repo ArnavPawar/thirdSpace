@@ -5,6 +5,7 @@ import type { LatLng, MapPressEvent, MarkerDragStartEndEvent, Region } from 'rea
 import * as Location from 'expo-location';
 import { Globe, LocateFixed, MapPin, Search, X } from 'lucide-react-native';
 import { CategoryIcon, Chip, ScorePill } from '@/components/ui';
+import { cityFromAddress, type NominatimAddress } from '@/lib/cities';
 import { listSpaces } from '@/lib/data';
 import { formatDistance } from '@/lib/format';
 import { buildViewbox, rankSearchResults } from '@/lib/search';
@@ -17,11 +18,13 @@ interface NominatimSearchResult {
   lat: string;
   lon: string;
   name?: string;
+  address?: NominatimAddress;
 }
 
 interface NominatimReverseResult {
   display_name?: string;
   name?: string;
+  address?: NominatimAddress;
 }
 
 type PlaceSuggestion = NominatimSearchResult & { distance: number; isFar: boolean };
@@ -106,7 +109,7 @@ export default function PlacePicker({
     mapRef.current?.animateToRegion({ ...coordinate, latitudeDelta: 0.012, longitudeDelta: 0.008 }, 300);
   }, [choose]);
 
-  const buildDraft = useCallback((name: string, address: string, coordinate: LatLng): ThirdSpace => {
+  const buildDraft = useCallback((name: string, address: string, coordinate: LatLng, city?: string): ThirdSpace => {
     const timestamp = new Date().toISOString();
     return {
       id: `draft-${coordinate.latitude.toFixed(5)}-${coordinate.longitude.toFixed(5)}`,
@@ -114,6 +117,7 @@ export default function PlacePicker({
       category: 'Cafe & Coworking',
       primary_purpose: CATEGORY_CONFIG['Cafe & Coworking'].purposes[0],
       address,
+      city,
       latitude: coordinate.latitude,
       longitude: coordinate.longitude,
       created_at: timestamp,
@@ -146,7 +150,7 @@ export default function PlacePicker({
       const place = (await response.json()) as NominatimReverseResult;
       const address = place.display_name || `${coordinate.latitude.toFixed(5)}, ${coordinate.longitude.toFixed(5)}`;
       const name = place.name || address.split(',')[0] || 'Dropped pin';
-      selectDraft(buildDraft(name, address, coordinate), coordinate);
+      selectDraft(buildDraft(name, address, coordinate, cityFromAddress(place.address)), coordinate);
     } catch {
       selectDraft(buildDraft('Dropped pin', `${coordinate.latitude.toFixed(5)}, ${coordinate.longitude.toFixed(5)}`, coordinate), coordinate);
     } finally {
@@ -186,7 +190,7 @@ export default function PlacePicker({
         const origin = userCoordinate || mapCenterRef.current;
         const fetchPlaces = async (bounded: boolean, limit: number) => {
           const response = await fetch(
-            'https://nominatim.openstreetmap.org/search?format=json'
+            'https://nominatim.openstreetmap.org/search?format=json&addressdetails=1'
               + `&limit=${limit}&viewbox=${buildViewbox(origin, NEARBY_RADIUS_MILES)}&bounded=${bounded ? 1 : 0}`
               + `&q=${encodeURIComponent(trimmedQuery)}`,
             { headers: NOMINATIM_HEADERS, signal: abortController.signal }
@@ -240,7 +244,7 @@ export default function PlacePicker({
   const handleSelectSuggestion = (suggestion: PlaceSuggestion) => {
     const coordinate = { latitude: Number(suggestion.lat), longitude: Number(suggestion.lon) };
     const name = suggestion.name || suggestion.display_name.split(',')[0] || 'Selected place';
-    selectDraft(buildDraft(name, suggestion.display_name, coordinate), coordinate);
+    selectDraft(buildDraft(name, suggestion.display_name, coordinate, cityFromAddress(suggestion.address)), coordinate);
     mapRef.current?.animateToRegion({ ...coordinate, latitudeDelta: 0.012, longitudeDelta: 0.008 }, 300);
   };
 
